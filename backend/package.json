@@ -1,0 +1,18 @@
+{
+  "name": "tsuzuri-backend",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "tsc",
+    "deploy": "powershell -File ./deploy.ps1"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.0.0",
+    "@aws-sdk/client-ses": "^3.0.0",
+    "stripe": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
