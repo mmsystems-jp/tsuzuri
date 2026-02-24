@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "綴り",
+    "slug": "cho",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "jp.mmsystems.cho",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "綴りを開くためにFace IDを使用します。",
+        "NSSpeechRecognitionUsageDescription": "音声で日記を入力するために使用します。",
+        "NSMicrophoneUsageDescription": "音声入力のためにマイクを使用します。",
+        "NSPhotoLibraryUsageDescription": "日記に写真を添付するために使用します。",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#f5f0e8"
+      },
+      "package": "jp.mmsystems.cho",
+      "permissions": [
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ]
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-local-authentication",
+      "expo-web-browser"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e224f983-5338-4fe9-a5cc-f91378b3f469"
+      }
+    }
+  }
+}

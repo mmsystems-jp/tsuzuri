@@ -2,7 +2,7 @@
   "name": "tsuzuri-backend",
   "version": "1.0.0",
   "scripts": {
-    "build": "tsc",
+    "build": "node build.mjs",
     "deploy": "powershell -File ./deploy.ps1"
   },
   "dependencies": {
@@ -13,6 +13,7 @@
   "devDependencies": {
     "@types/aws-lambda": "^8.10.0",
     "@types/node": "^20.0.0",
+    "esbuild": "^0.20.0",
     "typescript": "^5.0.0"
   }
 }

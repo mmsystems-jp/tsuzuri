@@ -1,41 +1,50 @@
 /**
- * 綴り 日記 Lambda
- * POST   /diary          → 日記保存（新規 or 上書き）
- * GET    /diary          → 一覧取得（月指定）
- * GET    /diary/{date}   → 1件取得
- * PUT    /diary/{date}   → 編集
- * DELETE /diary/{date}   → 削除
+ * 綴り 日記 Lambda (API Gateway v2対応)
  */
 
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { DynamoDBClient, PutItemCommand, GetItemCommand, QueryCommand, UpdateItemCommand, DeleteItemCommand } from '@aws-sdk/client-dynamodb';
+import { APIGatewayProxyResult } from 'aws-lambda';
+import { PutItemCommand, GetItemCommand, QueryCommand, UpdateItemCommand, DeleteItemCommand } from '@aws-sdk/client-dynamodb';
 import { dynamo, TABLE, ok, err, verifySession, todayJST } from '../../shared/utils';
 
-export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
-  if (event.httpMethod === 'OPTIONS') return ok({});
+function getMethodAndPath(event: any): { method: string; path: string } {
+  const method = (event.requestContext?.http?.method || event.httpMethod || '').toUpperCase();
+  const path = event.rawPath || event.path || '';
+  return { method, path };
+}
 
-  const token = event.headers.Authorization || event.headers.authorization || '';
-  const userId = await verifySession(token);
+export const handler = async (event: any): Promise<APIGatewayProxyResult> => {
+  const { method, path } = getMethodAndPath(event);
+
+  if (method === 'OPTIONS') return ok({});
+
+  const authHeader = event.headers?.Authorization || event.headers?.authorization || '';
+  const userId = await verifySession(authHeader);
   if (!userId) return err('Unauthorized', 401);
 
-  const body   = event.body ? JSON.parse(event.body) : {};
-  const date   = event.pathParameters?.date; // YYYY-MM-DD
-  const method = event.httpMethod;
+  const body = event.body ? JSON.parse(event.body) : {};
 
-  // ── 日記保存（新規 or 当日の上書き）──────────────────────────
+  // パスから日付を取得 /diary/2026-02-18 → 2026-02-18
+  const dateMatch = path.match(/\/diary\/(\d{4}-\d{2}-\d{2})$/);
+  const date = dateMatch ? dateMatch[1] : null;
+
+  // 日記保存（新規 or 指定日の上書き）
   if (!date && method === 'POST') {
     const { text, conversation, moodIdx } = body;
     if (!text) return err('textは必須です');
 
     const today = todayJST();
+    // bodyのdateを使う。未来日・形式不正は今日にフォールバック
+    const targetDate = (body.date && /^\d{4}-\d{2}-\d{2}$/.test(body.date) && body.date <= today)
+      ? body.date
+      : today;
     const charCount = text.length;
 
     await dynamo.send(new PutItemCommand({
       TableName: TABLE,
       Item: {
         PK:           { S: `USER#${userId}` },
-        SK:           { S: `DIARY#${today}` },
-        date:         { S: today },
+        SK:           { S: `DIARY#${targetDate}` },
+        date:         { S: targetDate },
         text:         { S: text },
         conversation: { S: JSON.stringify(conversation || []) },
         moodIdx:      { N: String(moodIdx ?? 0) },
@@ -45,11 +54,11 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       },
     }));
 
-    await updateStats(userId, today, charCount);
-    return ok({ date: today, saved: true });
+    await updateStats(userId, targetDate, charCount);
+    return ok({ date: targetDate, saved: true });
   }
 
-  // ── 一覧取得（?month=YYYY-MM）─────────────────────────────────
+  // 一覧取得（?month=YYYY-MM）
   if (!date && method === 'GET') {
     const month  = event.queryStringParameters?.month;
     const prefix = month ? `DIARY#${month}` : 'DIARY#';
@@ -76,7 +85,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     return ok({ entries });
   }
 
-  // ── 1件取得 ───────────────────────────────────────────────────
+  // 1件取得
   if (date && method === 'GET') {
     const res = await dynamo.send(new GetItemCommand({
       TableName: TABLE,
@@ -98,7 +107,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
   }
 
-  // ── 編集 ──────────────────────────────────────────────────────
+  // 編集
   if (date && method === 'PUT') {
     const { text, moodIdx } = body;
     if (!text) return err('textは必須です');
@@ -122,7 +131,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     return ok({ date, updated: true });
   }
 
-  // ── 削除 ──────────────────────────────────────────────────────
+  // 削除
   if (date && method === 'DELETE') {
     await dynamo.send(new DeleteItemCommand({
       TableName: TABLE,

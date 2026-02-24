@@ -7,3 +7,6 @@ dist/
 *.tfstate
 *.tfstate.backup
 .DS_Store
+
+auth-log*.txt
+expo-log*.txt

@@ -1,13 +1,11 @@
 /**
- * 綴り 認証 Lambda
- * POST /auth/send-otp  → OTPをメール送信
- * POST /auth/verify    → OTP検証 → セッショントークン返却
- * GET  /auth/me        → ログイン中ユーザー情報
- * POST /auth/logout    → セッション削除
+ * 綴り 認証 Lambda (API Gateway v2対応)
  */
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { DynamoDBClient, GetItemCommand, PutItemCommand, QueryCommand, DeleteItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { randomBytes } from 'crypto';
+import * as https from 'https';
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import { dynamo, TABLE, cors, ok, err, verifySession, newId } from '../../shared/utils';
 
@@ -15,13 +13,87 @@ const ses = new SESClient({ region: 'ap-northeast-1' });
 const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@tsuzuri.app';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://tsuzuri.app';
 const SESSION_TTL_DAYS = 30;
+const LINE_LOGIN_CHANNEL_ID = process.env.LINE_LOGIN_CHANNEL_ID || '';
+
+// ── LINE API helpers ─────────────────────────────────────────────
+function httpsGet(hostname: string, path: string, headers: Record<string, string> = {}): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const req = https.request({ hostname, path, method: 'GET', headers }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => { try { resolve(JSON.parse(data)); } catch { reject(new Error('JSON parse error')); } });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+async function verifyLineAccessToken(accessToken: string): Promise<{ client_id: string } | null> {
+  try {
+    return await httpsGet('api.line.me', `/oauth2/v2.1/verify?access_token=${accessToken}`);
+  } catch { return null; }
+}
+
+async function getLineProfile(accessToken: string): Promise<{ userId: string; displayName: string; pictureUrl?: string } | null> {
+  try {
+    return await httpsGet('api.line.me', '/v2/profile', { Authorization: `Bearer ${accessToken}` });
+  } catch { return null; }
+}
+
+async function findUserByLineId(lineUserId: string): Promise<{ userId: string } | null> {
+  try {
+    const res = await dynamo.send(new QueryCommand({
+      TableName: TABLE,
+      IndexName: 'lineUserId-index',
+      KeyConditionExpression: 'lineUserId = :lid',
+      FilterExpression: 'SK = :sk',
+      ExpressionAttributeValues: {
+        ':lid': { S: lineUserId },
+        ':sk':  { S: 'PROFILE' },
+      },
+    }));
+    if (!res.Items?.length) return null;
+    const userId = res.Items[0].PK?.S?.replace('USER#', '') || '';
+    return { userId };
+  } catch { return null; }
+}
+
+async function createUserFromLine(lineUserId: string, displayName: string, pictureUrl?: string): Promise<string> {
+  const userId = newId('u');
+  await dynamo.send(new PutItemCommand({
+    TableName: TABLE,
+    Item: {
+      PK:            { S: `USER#${userId}` },
+      SK:            { S: 'PROFILE' },
+      lineUserId:    { S: lineUserId },
+      displayName:   { S: displayName },
+      ...(pictureUrl ? { pictureUrl: { S: pictureUrl } } : {}),
+      plan:          { S: 'free' },
+      theme:         { S: 'light' },
+      notifyEnabled: { BOOL: false },
+      notifyHour:    { N: '21' },
+      streak:        { N: '0' },
+      totalEntries:  { N: '0' },
+      totalChars:    { N: '0' },
+      createdAt:     { S: new Date().toISOString() },
+    },
+  }));
+  return userId;
+}
 
 function generateOTP(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
 function generateToken(userId: string): string {
-  return `tsz_${userId}_${Math.random().toString(36).slice(2, 10)}`;
+  return `tsz_${userId}_${randomBytes(16).toString('hex')}`;
+}
+
+// API Gateway v1/v2両対応でmethod/pathを取得
+function getMethodAndPath(event: any): { method: string; path: string } {
+  const method = (event.requestContext?.http?.method || event.httpMethod || '').toUpperCase();
+  const path = event.rawPath || event.path || '';
+  return { method, path };
 }
 
 async function findUserByEmail(email: string): Promise<{ userId: string } | null> {
@@ -65,21 +137,84 @@ async function createUser(email: string): Promise<string> {
   return userId;
 }
 
-export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
-  if (event.httpMethod === 'OPTIONS') return ok({});
+export const handler = async (event: any): Promise<APIGatewayProxyResult> => {
+  const { method, path } = getMethodAndPath(event);
 
-  const path = event.path;
+  if (method === 'OPTIONS') return ok({});
+
   const body = event.body ? JSON.parse(event.body) : {};
 
-  // ── OTP送信 ────────────────────────────────────────────────────
-  if (path.endsWith('/send-otp') && event.httpMethod === 'POST') {
+  // LINE認証
+  if (path.endsWith('/auth/line') && method === 'POST') {
+    const { accessToken } = body;
+    if (!accessToken) return err('accessTokenは必須です');
+
+    // トークン検証
+    const tokenInfo = await verifyLineAccessToken(accessToken);
+    if (!tokenInfo || tokenInfo.client_id !== LINE_LOGIN_CHANNEL_ID) {
+      return err('LINEトークンが無効です', 401);
+    }
+
+    // プロフィール取得
+    const profile = await getLineProfile(accessToken);
+    if (!profile) return err('LINEプロフィールの取得に失敗しました');
+
+    const { userId: lineUserId, displayName, pictureUrl } = profile;
+
+    // ユーザー検索または新規作成
+    let userId: string;
+    const existing = await findUserByLineId(lineUserId);
+    const isNewUser = !existing;
+    if (existing) {
+      userId = existing.userId;
+    } else {
+      userId = await createUserFromLine(lineUserId, displayName, pictureUrl);
+    }
+
+    // セッション生成
+    const token = generateToken(userId);
+    const sessionTTL = Math.floor(Date.now() / 1000) + SESSION_TTL_DAYS * 24 * 60 * 60;
+    await dynamo.send(new PutItemCommand({
+      TableName: TABLE,
+      Item: {
+        PK:        { S: `USER#${userId}` },
+        SK:        { S: `SESSION#${token}` },
+        token:     { S: token },
+        expiresAt: { N: String(sessionTTL) },
+        createdAt: { S: new Date().toISOString() },
+      },
+    }));
+
+    return ok({ token, userId, displayName, pictureUrl, isNewUser });
+  }
+
+  // OTP送信
+  if (path.endsWith('/send-otp') && method === 'POST') {
     const email = body.email?.toLowerCase()?.trim();
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return err('メールアドレスが正しくありません');
     }
 
+    // 再送制限：既存OTPが残っている場合、作成から1分以内は再送不可
+    const existing = await dynamo.send(new GetItemCommand({
+      TableName: TABLE,
+      Key: { PK: { S: `OTP#${email}` }, SK: { S: 'OTP' } },
+    }));
+    if (existing.Item) {
+      const createdAt = Number(existing.Item.createdAt?.N || 0);
+      const sendCount = Number(existing.Item.sendCount?.N || 0);
+      const now = Math.floor(Date.now() / 1000);
+      if (now - createdAt < 60) {
+        return err('再送信は1分後に行ってください', 429);
+      }
+      if (sendCount >= 5) {
+        return err('送信回数の上限に達しました。しばらくしてから試してください', 429);
+      }
+    }
+
     const otp = generateOTP();
-    const expiresAt = Math.floor(Date.now() / 1000) + 10 * 60; // 10分
+    const expiresAt = Math.floor(Date.now() / 1000) + 10 * 60;
+    const sendCount = existing.Item ? Number(existing.Item.sendCount?.N || 0) + 1 : 1;
 
     await dynamo.send(new PutItemCommand({
       TableName: TABLE,
@@ -90,6 +225,8 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         email:     { S: email },
         expiresAt: { N: String(expiresAt) },
         attempts:  { N: '0' },
+        sendCount: { N: String(sendCount) },
+        createdAt: { N: String(Math.floor(Date.now() / 1000)) },
       },
     }));
 
@@ -110,8 +247,8 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     return ok({ message: 'OTPを送信しました' });
   }
 
-  // ── OTP検証 ────────────────────────────────────────────────────
-  if (path.endsWith('/verify') && event.httpMethod === 'POST') {
+  // OTP検証
+  if (path.endsWith('/verify') && method === 'POST') {
     const email = body.email?.toLowerCase()?.trim();
     const code  = body.code?.trim();
     if (!email || !code) return err('メールアドレスとコードは必須です');
@@ -165,9 +302,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     return ok({ token, userId, isNewUser: !existing });
   }
 
-  // ── ログインユーザー情報 ───────────────────────────────────────
-  if (path.endsWith('/me') && event.httpMethod === 'GET') {
-    const userId = await verifySession(event.headers.Authorization || event.headers.authorization || '');
+  // ログインユーザー情報
+  if (path.endsWith('/me') && method === 'GET') {
+    const authHeader = event.headers?.Authorization || event.headers?.authorization || '';
+    const userId = await verifySession(authHeader);
     if (!userId) return err('Unauthorized', 401);
 
     const res = await dynamo.send(new GetItemCommand({
@@ -179,6 +317,9 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     return ok({
       userId,
       email:         res.Item.email?.S,
+      displayName:   res.Item.displayName?.S,
+      pictureUrl:    res.Item.pictureUrl?.S,
+      lineUserId:    res.Item.lineUserId?.S,
       plan:          res.Item.plan?.S,
       theme:         res.Item.theme?.S,
       notifyEnabled: res.Item.notifyEnabled?.BOOL,
@@ -189,9 +330,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
   }
 
-  // ── ログアウト ─────────────────────────────────────────────────
-  if (path.endsWith('/logout') && event.httpMethod === 'POST') {
-    const token = (event.headers.Authorization || event.headers.authorization || '').replace('Bearer ', '');
+  // ログアウト
+  if (path.endsWith('/logout') && method === 'POST') {
+    const authHeader = event.headers?.Authorization || event.headers?.authorization || '';
+    const token = authHeader.replace('Bearer ', '');
     const userId = await verifySession(token);
     if (!userId) return ok({ message: 'ok' });
 

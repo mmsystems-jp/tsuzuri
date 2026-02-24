@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tr >:*)",
+      "Bash(sed:*)",
+      "Bash(\"/c/Users/mitsu/AppData/Local/Android/Sdk/platform-tools/adb.exe\":*)"
+    ]
+  }
+}
