@@ -10,3 +10,6 @@ dist/
 
 auth-log*.txt
 expo-log*.txt
+
+auth-log*.txt
+expo-log*.txt
