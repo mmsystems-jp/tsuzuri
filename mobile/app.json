@@ -10,9 +10,6 @@
       "bundleIdentifier": "jp.mmsystems.cho",
       "infoPlist": {
         "NSFaceIDUsageDescription": "綴りを開くためにFace IDを使用します。",
-        "NSSpeechRecognitionUsageDescription": "音声で日記を入力するために使用します。",
-        "NSMicrophoneUsageDescription": "音声入力のためにマイクを使用します。",
-        "NSPhotoLibraryUsageDescription": "日記に写真を添付するために使用します。",
         "ITSAppUsesNonExemptEncryption": false
       }
     },

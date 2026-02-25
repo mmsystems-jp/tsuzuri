@@ -8,8 +8,6 @@ import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
-import * as Speech from 'expo-speech';
-import Voice from '@react-native-voice/voice'; // EAS Build必須
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -39,7 +37,6 @@ const C = {
   red:        '#c0392b',
   line:       'rgba(26,21,16,0.12)',
   white:      '#ffffff',
-  voiceActive:'#4a3f35',
 };
 
 // ── API helpers ───────────────────────────────────────────────────
@@ -118,12 +115,6 @@ const SYSTEM_PROMPT = `あなたは「綴り」というAI日記アプリの、�
 - ユーザーが話したくなるような、具体的で温かい問いかけをする
 - 絵文字・記号は一切使わない
 - 「日記にまとめてみましょうか？」と聞いた後、ユーザーが承諾した場合は「[GENERATE]」とだけ返す`;
-
-const SYSTEM_PROMPT_VOICE = `${SYSTEM_PROMPT}
-
-【音声モード追加ルール】
-- 返答は必ず40字以内に収める（読み上げるため簡潔に）
-- 句読点を適切に使い、自然な読み上げリズムにする`;
 
 function getDiaryPrompt(conversation) {
   return `以下は、ある人が今日一日について話した会話です。
@@ -223,275 +214,8 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-// ── 音声モード画面 ────────────────────────────────────────────────
-// テキスト表示なし、マイクボタン中心、Claudeは音声で返答
-function VoiceChatScreen({ onBack, onGenerateDone, targetDate }) {
-  const firstMsg = getInitialMessage();
-  const [messages, setMessages] = useState([{ role: 'assistant', content: firstMsg }]);
-  const [status, setStatus] = useState('idle'); // idle | listening | thinking | speaking
-  const [transcript, setTranscript] = useState('');
-  const [lastAiText, setLastAiText] = useState(firstMsg);
-  const [generating, setGenerating] = useState(false);
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const messagesRef = useRef(messages);
-  messagesRef.current = messages;
-  const statusRef = useRef(status);
-  statusRef.current = status;
-
-  // パルスアニメーション
-  useEffect(() => {
-    if (status === 'listening') {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, { toValue: 1.3, duration: 600, useNativeDriver: true }),
-          Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
-        ])
-      ).start();
-    } else {
-      pulseAnim.stopAnimation();
-      pulseAnim.setValue(1);
-    }
-  }, [status]);
-
-  // Voice イベント設定
-  useEffect(() => {
-    Voice.onSpeechResults = (e) => {
-      const text = e.value?.[0] || '';
-      if (text) setTranscript(text);
-    };
-    Voice.onSpeechEnd = () => {
-      // 少し待ってから確定（音声認識の遅延考慮）
-      setTimeout(() => {
-        const text = transcript;
-        if (text.trim()) handleVoiceSend(text);
-        else setStatus('idle');
-      }, 500);
-    };
-    Voice.onSpeechError = () => setStatus('idle');
-
-    // 最初のメッセージを読み上げてから待機
-    speakAndThenListen(firstMsg);
-
-    return () => {
-      Voice.destroy().then(Voice.removeAllListeners);
-      Speech.stop();
-    };
-  }, []);
-
-  async function speakAndThenListen(text) {
-    setStatus('speaking');
-    await new Promise(resolve => {
-      Speech.speak(text, {
-        language: 'ja-JP',
-        rate: 0.9,
-        pitch: 1.0,
-        onDone: resolve,
-        onStopped: resolve,
-        onError: resolve,
-      });
-    });
-    // 読み上げ完了後、自動でリスニング開始
-    startListening();
-  }
-
-  async function startListening() {
-    try {
-      setTranscript('');
-      setStatus('listening');
-      await Voice.start('ja-JP');
-    } catch {
-      setStatus('idle');
-    }
-  }
-
-  async function stopListening() {
-    try {
-      await Voice.stop();
-    } catch {}
-  }
-
-  async function handleVoiceSend(text) {
-    setStatus('thinking');
-    const newMessages = [...messagesRef.current, { role: 'user', content: text }];
-    setMessages(newMessages);
-    setTranscript('');
-
-    try {
-      const res = await fetch(CLAUDE_API, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': ANTHROPIC_KEY,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 120,
-          system: SYSTEM_PROMPT_VOICE,
-          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
-        }),
-      });
-      const data = await res.json();
-      const reply = data.content?.[0]?.text || 'もう一度教えてください。';
-
-      if (reply.trim() === '[GENERATE]') {
-        // 日記生成
-        Speech.speak('では日記にまとめます。少しお待ちください。', { language: 'ja-JP', rate: 0.9 });
-        setGenerating(true);
-        await generateDiary(newMessages);
-      } else {
-        setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
-        setLastAiText(reply);
-        await speakAndThenListen(reply);
-      }
-    } catch {
-      Speech.speak('少し問題が発生しました。もう一度話しかけてください。', { language: 'ja-JP' });
-      setTimeout(() => startListening(), 2000);
-    }
-  }
-
-  async function generateDiary(msgList) {
-    const src = msgList || messagesRef.current;
-    try {
-      const conversation = src
-        .map(m => `${m.role === 'user' ? 'あなた' : '綴り'}: ${m.content}`)
-        .join('\n');
-      const res = await fetch(CLAUDE_API, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': ANTHROPIC_KEY,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 600,
-          messages: [{ role: 'user', content: getDiaryPrompt(conversation) }],
-        }),
-      });
-      const data = await res.json();
-      const diaryText = data.content?.[0]?.text || '';
-
-      // 日記を読み上げてレビュー
-      setStatus('speaking');
-      setLastAiText('日記ができました。読み上げます。');
-      await new Promise(resolve => {
-        Speech.speak(`日記ができました。${diaryText}`, {
-          language: 'ja-JP',
-          rate: 0.85,
-          onDone: resolve,
-          onStopped: resolve,
-          onError: resolve,
-        });
-      });
-
-      // 保存確認
-      setLastAiText('この内容で保存しますか？');
-      await new Promise(resolve => {
-        Speech.speak('この内容で保存しますか？', {
-          language: 'ja-JP',
-          onDone: resolve,
-        });
-      });
-
-      onGenerateDone(diaryText, src);
-    } catch {
-      Speech.speak('日記の生成に失敗しました。', { language: 'ja-JP' });
-      setGenerating(false);
-      setStatus('idle');
-    }
-  }
-
-  function handleMicPress() {
-    if (status === 'listening') {
-      stopListening();
-    } else if (status === 'idle') {
-      startListening();
-    } else if (status === 'speaking') {
-      Speech.stop();
-      startListening();
-    }
-  }
-
-  const userCount = messages.filter(m => m.role === 'user').length;
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: C.ink }}>
-      {/* ヘッダー */}
-      <View style={s.voiceHeader}>
-        <TouchableOpacity onPress={() => { Speech.stop(); Voice.destroy(); onBack(); }}>
-          <Text style={s.voiceHeaderBack}>← 戻る</Text>
-        </TouchableOpacity>
-        <Text style={s.voiceHeaderTitle}>音声モード</Text>
-        {userCount >= 2 && (
-          <TouchableOpacity onPress={() => generateDiary()} disabled={generating}>
-            <Text style={s.voiceHeaderBtn}>{generating ? '生成中' : '日記にする'}</Text>
-          </TouchableOpacity>
-        )}
-        {userCount < 2 && <View style={{ width: 64 }} />}
-      </View>
-
-      {/* メインエリア */}
-      <View style={s.voiceMain}>
-        {/* ステータスインジケーター */}
-        <Text style={s.voiceStatus}>
-          {status === 'idle'      && 'マイクをタップして話しかける'}
-          {status === 'listening' && '聞いています...'}
-          {status === 'thinking'  && '考えています...'}
-          {status === 'speaking'  && ''}
-        </Text>
-
-        {/* 認識中のテキスト */}
-        {transcript ? (
-          <Text style={s.voiceTranscript}>「{transcript}」</Text>
-        ) : null}
-
-        {/* AIの最後の発言 */}
-        {(status === 'speaking' || status === 'idle') && lastAiText ? (
-          <View style={s.voiceAiBubble}>
-            <Text style={s.voiceAiText}>{lastAiText}</Text>
-          </View>
-        ) : null}
-
-        {/* マイクボタン */}
-        <View style={s.voiceMicWrap}>
-          {status === 'listening' && (
-            <Animated.View style={[s.voicePulse, { transform: [{ scale: pulseAnim }] }]} />
-          )}
-          <TouchableOpacity
-            style={[
-              s.voiceMicBtn,
-              status === 'listening' && s.voiceMicBtnActive,
-              status === 'thinking'  && s.voiceMicBtnThinking,
-              status === 'speaking'  && s.voiceMicBtnSpeaking,
-            ]}
-            onPress={handleMicPress}
-            disabled={status === 'thinking' || generating}
-          >
-            {status === 'thinking' ? (
-              <ActivityIndicator color={C.paper} />
-            ) : (
-              <Text style={s.voiceMicIcon}>
-                {status === 'listening' ? '⏹' :
-                 status === 'speaking'  ? '⏩' : '🎤'}
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        {/* ヒント */}
-        <Text style={s.voiceHint}>
-          {status === 'speaking' ? '⏩ タップでスキップ' :
-           status === 'listening' ? '⏹ タップで送信' :
-           `${userCount}回話しました${userCount >= 2 ? '　日記にできます' : ''}`}
-        </Text>
-      </View>
-    </SafeAreaView>
-  );
-}
-
 // ── テキストチャット画面 ──────────────────────────────────────────
-function ChatScreen({ onBack, onGenerateDone, targetDate, onSwitchToVoice }) {
+function ChatScreen({ onBack, onGenerateDone, targetDate }) {
   const dateLabel = targetDate && targetDate !== todayJST()
     ? formatDate(targetDate).full : null;
   const firstMsg = dateLabel
@@ -502,28 +226,7 @@ function ChatScreen({ onBack, onGenerateDone, targetDate, onSwitchToVoice }) {
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [starterUsed, setStarterUsed] = useState(false);
-  const [isListening, setIsListening] = useState(false);
   const scrollRef = useRef(null);
-
-  useEffect(() => {
-    Voice.onSpeechResults = (e) => {
-      const text = e.value?.[0] || '';
-      if (text) setInput(prev => prev ? `${prev} ${text}` : text);
-    };
-    Voice.onSpeechEnd = () => setIsListening(false);
-    Voice.onSpeechError = () => setIsListening(false);
-    return () => { Voice.destroy().then(Voice.removeAllListeners); };
-  }, []);
-
-  async function startListening() {
-    try { setIsListening(true); await Voice.start('ja-JP'); }
-    catch { setIsListening(false); Alert.alert('エラー', '音声認識を開始できませんでした'); }
-  }
-
-  async function stopListening() {
-    try { await Voice.stop(); } catch {}
-    setIsListening(false);
-  }
 
   const userTurnCount = messages.filter(m => m.role === 'user').length;
   const canGenerate = userTurnCount >= 2;
@@ -610,22 +313,14 @@ function ChatScreen({ onBack, onGenerateDone, targetDate, onSwitchToVoice }) {
           ? <TouchableOpacity onPress={onBack}><Text style={s.iconBtn}>← 戻る</Text></TouchableOpacity>
           : <Text style={s.headerTitle}>綴り</Text>
         }
-        <Text style={s.headerSub}>{dateLabel || 'テキスト'}</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          {/* 音声モード切り替えボタン */}
-          {onSwitchToVoice && (
-            <TouchableOpacity style={s.modeSwitchBtn} onPress={onSwitchToVoice}>
-              <Text style={s.modeSwitchBtnText}>🎤 音声</Text>
-            </TouchableOpacity>
-          )}
-          {canGenerate ? (
-            <TouchableOpacity style={s.btnAccentSm} onPress={() => generateDiary()} disabled={generating || loading}>
-              <Text style={s.btnAccentSmText}>{generating ? '生成中...' : '日記にする'}</Text>
-            </TouchableOpacity>
-          ) : (
-            <View style={{ width: 72 }} />
-          )}
-        </View>
+        <Text style={s.headerSub}>{dateLabel || ''}</Text>
+        {canGenerate ? (
+          <TouchableOpacity style={s.btnAccentSm} onPress={() => generateDiary()} disabled={generating || loading}>
+            <Text style={s.btnAccentSmText}>{generating ? '生成中...' : '日記にする'}</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 72 }} />
+        )}
       </View>
 
       {!canGenerate && userTurnCount > 0 && (
@@ -668,19 +363,12 @@ function ChatScreen({ onBack, onGenerateDone, targetDate, onSwitchToVoice }) {
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={s.chatInputBar}>
-          <TouchableOpacity
-            style={[s.voiceBtn, isListening && s.voiceBtnActive]}
-            onPress={isListening ? stopListening : startListening}
-            disabled={loading}
-          >
-            <Text style={{ fontSize: 20 }}>{isListening ? '⏹' : '🎤'}</Text>
-          </TouchableOpacity>
           <TextInput
             style={s.chatInput}
             value={input}
             onChangeText={setInput}
-            placeholder={isListening ? '聞いています...' : '話しかけるか、入力してください'}
-            placeholderTextColor={isListening ? C.accent : C.inkFaint}
+            placeholder="今日のことを話してください"
+            placeholderTextColor={C.inkFaint}
             multiline
           />
           <TouchableOpacity
@@ -879,16 +567,6 @@ function DiaryDetail({ entry, onBack, onSave }) {
 
 // ── 設定 ──────────────────────────────────────────────────────────
 function SettingsScreen({ user, onLogout, onCreateTestData, onDeleteToday }) {
-  const TEST_TEXTS = [
-    '今日は朝から雨だった。通勤電車の中でふと友人のことを思い出して、先週連絡したままになっていることに気がついた。昼休みに少し時間ができたので返信した。小さなことだけど、すっきりした。',
-    'ミーティングが三つ続きの一日だった。最後の会議が終わったときにはもう外が暗くなっていた。精神的に疲れた気がするけど、帰りに買った小さなお菓子で週末を楽しみにすることにした。',
-    '今日は時間をとって開発に集中できた。難しい問題につきあたっていたけど、小さな突破口が見つかった気がする。明日また続きを試してみる。',
-    '久しぶりに大学の友人と飲みに行った。お互いの最近の話をしていたらどんどん積もって、結局三時間近く居た。人と話すのはやっぱりいいものだと改めて思った。',
-    '朝起きたら天気が良くて少し長めに散歩した。近所の公園にもう梅が咲いていた。写真を何枚か撮ったけど、やっぱり目で見た一瞬がいちばんいい。',
-    '見積もり作業に終日かかった。数字を組み立てる作業は苦手だけど、最終的に整ったときに満足感がある。夜は少し早めに寝て体を休めたい。',
-    '何もなかった一日。それでもコーヒーが特別うまく淹れられた。そのくらいか。',
-  ];
-
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.paper }}>
       <View style={s.header}><Text style={s.headerTitle}>設定</Text></View>
@@ -935,8 +613,7 @@ export default function App() {
   const [user, setUser]       = useState(null);
   const [entries, setEntries] = useState([]);
   const [tab, setTab]         = useState('chat');
-  // screen: null | 'chat' | 'voice' | 'preview' | 'detail'
-  const [screen, setScreen]   = useState(null);
+  const [screen, setScreen]   = useState(null); // null | 'chat' | 'preview' | 'detail'
   const [selectedEntry, setSelectedEntry] = useState(null);
   const [pendingDiary, setPendingDiary]   = useState(null);
   const [targetDate, setTargetDate]       = useState(null);
@@ -1040,23 +717,12 @@ export default function App() {
 
   if (!authed) return <LoginScreen onLogin={handleLogin} />;
 
-  // オーバーレイ画面
-  if (screen === 'voice') {
-    return (
-      <VoiceChatScreen
-        onBack={() => setScreen(null)}
-        onGenerateDone={handleGenerateDone}
-        targetDate={targetDate}
-      />
-    );
-  }
   if (screen === 'chat') {
     return (
       <ChatScreen
         onBack={() => { setScreen(null); setTargetDate(null); }}
         onGenerateDone={handleGenerateDone}
         targetDate={targetDate}
-        onSwitchToVoice={() => setScreen('voice')}
       />
     );
   }
@@ -1082,7 +748,6 @@ export default function App() {
           onBack={null}
           onGenerateDone={handleGenerateDone}
           targetDate={null}
-          onSwitchToVoice={() => setScreen('voice')}
         />
       )}
       {tab === 'records' && (
@@ -1127,10 +792,6 @@ const s = StyleSheet.create({
   headerSub:      { fontSize: 11, color: '#9a8f85', letterSpacing: 1 },
   iconBtn:        { fontSize: 14, color: '#4a3f35' },
 
-  // テキストモード切り替えボタン
-  modeSwitchBtn:     { borderWidth: 1, borderColor: 'rgba(26,21,16,0.2)', paddingHorizontal: 10, paddingVertical: 5, marginRight: 8 },
-  modeSwitchBtnText: { fontSize: 12, color: '#4a3f35' },
-
   homeContent:    { flex: 1, padding: 16 },
   entryItem:      { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(26,21,16,0.12)', gap: 12 },
   entryDateCol:   { width: 32, alignItems: 'center' },
@@ -1166,29 +827,6 @@ const s = StyleSheet.create({
   chatInputBar:   { flexDirection: 'row', borderTopWidth: 1, borderTopColor: 'rgba(26,21,16,0.12)', backgroundColor: '#ffffff' },
   chatInput:      { flex: 1, padding: 14, fontSize: 15, color: '#1a1510', maxHeight: 120 },
   sendBtn:        { backgroundColor: '#1a1510', paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center' },
-  voiceBtn:       { paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center', borderRightWidth: 1, borderRightColor: 'rgba(26,21,16,0.12)' },
-  voiceBtnActive: { backgroundColor: '#fff0e8' },
-
-  // 音声モード専用スタイル
-  voiceHeader:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.1)' },
-  voiceHeaderBack: { fontSize: 14, color: 'rgba(245,240,232,0.6)' },
-  voiceHeaderTitle:{ fontSize: 14, color: '#f5f0e8', letterSpacing: 2 },
-  voiceHeaderBtn:  { fontSize: 13, color: '#c4956a' },
-
-  voiceMain:       { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
-  voiceStatus:     { fontSize: 13, color: 'rgba(245,240,232,0.5)', letterSpacing: 1.5, marginBottom: 24, textAlign: 'center' },
-  voiceTranscript: { fontSize: 16, color: '#f5f0e8', textAlign: 'center', marginBottom: 24, fontStyle: 'italic', lineHeight: 26 },
-  voiceAiBubble:   { backgroundColor: 'rgba(245,240,232,0.1)', padding: 20, marginBottom: 48, maxWidth: '100%', borderLeftWidth: 2, borderLeftColor: '#c4956a' },
-  voiceAiText:     { fontSize: 16, color: 'rgba(245,240,232,0.85)', lineHeight: 28, textAlign: 'center' },
-
-  voiceMicWrap:    { alignItems: 'center', justifyContent: 'center', marginBottom: 24, width: 120, height: 120 },
-  voicePulse:      { position: 'absolute', width: 100, height: 100, borderRadius: 50, backgroundColor: 'rgba(139,94,60,0.3)' },
-  voiceMicBtn:     { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(245,240,232,0.15)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(245,240,232,0.2)' },
-  voiceMicBtnActive:   { backgroundColor: '#8b5e3c', borderColor: '#c4956a' },
-  voiceMicBtnThinking: { backgroundColor: 'rgba(245,240,232,0.08)', borderColor: 'rgba(245,240,232,0.1)' },
-  voiceMicBtnSpeaking: { backgroundColor: 'rgba(196,149,106,0.2)', borderColor: '#c4956a' },
-  voiceMicIcon:    { fontSize: 32 },
-  voiceHint:       { fontSize: 11, color: 'rgba(245,240,232,0.3)', letterSpacing: 1, textAlign: 'center' },
 
   previewDateLabel:{ fontSize: 11, color: '#9a8f85', letterSpacing: 2, marginBottom: 20 },
   previewHint:     { marginTop: 24, paddingTop: 16, borderTopWidth: 1, borderTopColor: 'rgba(26,21,16,0.12)' },
