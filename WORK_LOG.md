@@ -54,3 +54,11 @@
 - mobile/App.js
 - backend/lambda/diary/index.ts
 - HANDOVER_20260228_2359.md（引継ぎ書）
+
+---
+
+### EASビルド（TestFlight）
+
+- AI記憶機能実装後の初TestFlightビルド
+- `eas build --platform ios --profile preview` 実行
+- ビルドURL: https://expo.dev/accounts/mmsystems/builds/
