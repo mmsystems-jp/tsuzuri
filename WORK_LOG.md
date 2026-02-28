@@ -2,6 +2,20 @@
 
 ## 2026-02-28
 
+### AI記憶機能実装セッション
+
+**変更内容**
+- GET /profile エンドポイント追加（aiProfile + 直近3日の日記テキストを返す）
+- 日記保存後（POST/PUT）にプロフィール抽出を fire-and-forget で実行
+- extractAndUpdateProfile: Claude Haiku で occupation/family/hobbies/personality/topics を JSON 抽出・更新
+- App.js ChatScreen: プロフィール取得 useEffect 追加、buildSystemPrompt を拡張（長期記憶 + 短期記憶セクション）
+
+**変更ファイル**
+- backend/lambda/diary/index.ts
+- mobile/App.js
+
+---
+
 ### UI改善セッション
 
 **変更内容**

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, SafeAreaView, KeyboardAvoidingView, Platform,
-  Animated, ActivityIndicator, Alert
+  Animated, ActivityIndicator, Alert, PanResponder
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -88,10 +88,12 @@ function getStarterResponse(starter) {
 }
 
 const STARTERS = ['よい一日だった','少し疲れた','なんでもない一日','嬉しいことがあった','悩んでいることがある'];
+const STARTERS_APPEND = ['実はまだある','気になってたこと','ちょっと追加したい','別の話なんだけど'];
 
-const SYSTEM_PROMPT = `あなたは「綴り」というAI日記アプリの、やさしい友人です。
+function buildSystemPrompt(questionCount = 2, profile = null, recentDiaries = []) {
+  let prompt = `あなたは「綴り」というAI日記アプリの、やさしい友人です。
 【役割】ユーザーが今日あったことや気持ちを話しやすいよう、自然な会話で引き出してください。カウンセラーのように共感しながら、日常のひとコマを一緒に振り返る存在です。
-【会話の進め方】1. まず書き手の話をしっかり受け止め、共感を示す 2. 気持ちや状況をもう少し引き出す問いをひとつだけする 3. 具体的にどんな場面だったかを一言で掘り下げる 4. ユーザーの発言が十分な量になったら、会話を自然に締めくくり「今日のことを日記にまとめてみましょうか？」と聞く。それ以前でも話が一区切りついたと感じたら同様に進めていい
+【会話の進め方】ユーザーのメッセージ数が${questionCount}回以上になったら、会話を自然に締めくくり「今日のことを日記にまとめてみましょうか？」と聞く。${questionCount}回未満の間は、共感しながら質問を続けて話を引き出す。
 
 【守るルール】- 質問は必ず一度に一つだけ - 一つの返答は50〜80文字以内に収める - 「なるほど」「そうですね」だけで終わらず、必ず次の問いかけをする - 「大丈夫ですか？」「頑張ってください」などの形式的な励ましは避ける - ユーザーが話したくなるような、具体的で温かい問いかけをする - 敬体（丁寧語）は一切使わない
 【日記生成の判断】「日記にまとめてみましょうか？」と聞いた後：
@@ -99,12 +101,50 @@ const SYSTEM_PROMPT = `あなたは「綴り」というAI日記アプリの、�
 - ユーザーが「いいえ」「まだ」「もう少し話したい」など断ったら、会話を自然に続ける
 - ユーザーが新しい話題を話し始めたら、その話題に乗って会話を続ける`;
 
-function getDiaryPrompt(conversation) {
+  // プロフィール・直近日記をプロンプトに追加
+  const profileLines = [];
+  if (profile) {
+    if (profile.occupation) profileLines.push(`仕事：${profile.occupation}`);
+    if (profile.family)     profileLines.push(`家族：${profile.family}`);
+    if (profile.hobbies)    profileLines.push(`趣味・興味：${profile.hobbies}`);
+    if (profile.topics)     profileLines.push(`よく話すテーマ：${profile.topics}`);
+  }
+  const recentLines = (recentDiaries || []).map(d => `${d.date}：${(d.text || '').slice(0, 100)}`);
+
+  if (profileLines.length > 0 || recentLines.length > 0) {
+    if (profileLines.length > 0) {
+      prompt += `\n\n【話している相手について】\n${profileLines.join('\n')}`;
+    }
+    if (recentLines.length > 0) {
+      prompt += `\n\n【最近の出来事（直近3日）】\n${recentLines.join('\n')}`;
+    }
+  }
+
+  return prompt;
+}
+
+function getDiaryPrompt(conversation, existingText) {
+  if (existingText) {
+    // 追記モード：追加会話から追記文のみ生成
+    return `以下の会話をもとに、日記の「追記」を書いてください。
+【守るルール】- 既存の日記の続きとして自然につながる文章にする - 「希ると」「その後」などの接続詞で始めない - 一人称で書く - Markdown不可、素の文字のみ
+- 100〜200文字程度に収める - 会話の引用はしない - 「。」で区切り、読みやすいリズムに
+
+追加の会話：${conversation}`;
+  }
   return `以下の、ある人が今日一日について話した会話です。この会話をもとに、その人の一人称日記を書いてください。
-【守るルール】- 一人称（「今日は」「私は」など）で書く - Markdownは一切使わない（見出しも箇条書きも使わない）- 素の文字のみで書く。会話の引用もしない - その人が辿った感情を、具体的な場面とともに表現する
-- 誇張しすぎず、自己中心大の感情で書く - 200〜350文字程度に収める - 「。」で文字を区切り、読みやすいリズムにする
+【守るルール】- 一人称（「今日は」「私は」など）で書く - Markdownは一切使わない - 素の文字のみで書く。会話の引用もしない - その人が辿った感情を、具体的な場面とともに表現する
+- 誇張しすぎず、200〜350文字程度に収める - 「。」で文字を区切り、読みやすいリズムにする
 
 会話：${conversation}`;
+}
+
+// 落款文字列を生成
+function buildColophon(closing, name) {
+  if (!closing && !name) return '';
+  if (!closing) return name;
+  if (!name) return closing;
+  return `${closing} ${name}`;
 }
 
 function RuledBackground({ children }) {
@@ -232,21 +272,35 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-function ChatScreen({ onBack, onGenerateDone, targetDate, questionCount = 2 }) {
+function ChatScreen({ onBack, onGenerateDone, targetDate, questionCount = 2, existingText = null }) {
   const dateLabel = targetDate && targetDate !== todayJST()
     ? formatDate(targetDate).full : null;
-  const firstMsg = dateLabel
-    ? `${dateLabel}のことを振り返ってみましょう。どんな一日でしたか？`
-    : getInitialMessage();
+  const firstMsg = existingText
+    ? 'さっきの日記、読んだよ。その後、何か追加で話したいことはある？'
+    : dateLabel
+      ? `${dateLabel}のことを振り返ってみましょう。どんな一日でしたか？`
+      : getInitialMessage();
   const [messages, setMessages] = useState([{ role: 'assistant', content: firstMsg }]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [starterUsed, setStarterUsed] = useState(false);
   const scrollRef = useRef(null);
+  const [userProfile, setUserProfile] = useState(null);
+  const [recentDiaries, setRecentDiaries] = useState([]);
+
+  // 起動時にプロフィール・直近日記を取得
+  useEffect(() => {
+    apiFetch('/profile').then(data => {
+      if (data.aiProfile) {
+        try { setUserProfile(JSON.parse(data.aiProfile)); } catch {}
+      }
+      setRecentDiaries(data.recentDiaries || []);
+    }).catch(() => {});
+  }, []);
 
   const userTurnCount = messages.filter(m => m.role === 'user').length;
-  const canGenerate = userTurnCount >= questionCount;
+  const canGenerate = userTurnCount >= 2;
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -273,7 +327,7 @@ function ChatScreen({ onBack, onGenerateDone, targetDate, questionCount = 2 }) {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 150,
-        system: SYSTEM_PROMPT,
+        system: buildSystemPrompt(questionCount, userProfile, recentDiaries),
         messages: messageList.map(m => ({ role: m.role, content: m.content })),
       }),
     });
@@ -326,7 +380,7 @@ function ChatScreen({ onBack, onGenerateDone, targetDate, questionCount = 2 }) {
         body: JSON.stringify({
           model: 'claude-haiku-4-5-20251001',
           max_tokens: 600,
-          messages: [{ role: 'user', content: getDiaryPrompt(conversation) }],
+          messages: [{ role: 'user', content: getDiaryPrompt(conversation, existingText) }],
         }),
       });
       const data = await res.json();
@@ -359,7 +413,7 @@ function ChatScreen({ onBack, onGenerateDone, targetDate, questionCount = 2 }) {
       {userTurnCount > 0 && (
         <View style={[s.turnIndicator, canGenerate && s.turnIndicatorReady]}>
           <Text style={[s.turnIndicatorText, canGenerate && s.turnIndicatorTextReady]}>
-            {canGenerate ? '右上のボタンから日記にまとめられます' : `あと${questionCount - userTurnCount}回話すと日記にできます`}
+            {canGenerate ? '好きなときに日記にまとめられます。そのまま話し続けてもOK' : 'もう少し話してから日記にできます'}
           </Text>
         </View>
       )}
@@ -388,7 +442,7 @@ function ChatScreen({ onBack, onGenerateDone, targetDate, questionCount = 2 }) {
 
       {!starterUsed && messages.length <= 1 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.starterScroll} contentContainerStyle={{ padding: 12, gap: 8 }}>
-          {STARTERS.map(st => (
+          {(existingText ? STARTERS_APPEND : STARTERS).map(st => (
             <TouchableOpacity key={st} style={s.starterBtn} onPress={() => handleStarter(st)}>
               <Text style={s.starterBtnText}>{st}</Text>
             </TouchableOpacity>
@@ -439,6 +493,25 @@ function RecordListScreen({ entries, onSelectEntry, onWriteForDate }) {
   const [weekStart, setWeekStart] = useState(getWeekStart(today));
   const [selectedDate, setSelectedDate] = useState(today);
 
+  const swipedRef = useRef(false);
+  const panResponder = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 8 && Math.abs(g.dy) < 20,
+    onPanResponderGrant: () => { swipedRef.current = false; },
+    onPanResponderMove: (_, g) => {
+      if (swipedRef.current) return;
+      if (g.dx < -40) {
+        swipedRef.current = true;
+        setWeekStart(prev => {
+          const next = addDays(prev, 7);
+          return next <= getWeekStart(today) ? next : prev;
+        });
+      } else if (g.dx > 40) {
+        swipedRef.current = true;
+        setWeekStart(prev => addDays(prev, -7));
+      }
+    },
+  })).current;
+
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const months = [...new Set(weekDays.map(d => parseInt(d.slice(5, 7))))];
   const year = parseInt(weekStart.slice(0, 4));
@@ -457,6 +530,7 @@ function RecordListScreen({ entries, onSelectEntry, onWriteForDate }) {
   function handleDayPress(dateStr) {
     if (dateStr > today) return;
     setSelectedDate(dateStr);
+    // 記録がある日はそのまま選択状態のみ（アコーディオンから開く）
   }
 
   const DAYS = ['日','月','火','水','木','金','土'];
@@ -468,7 +542,7 @@ function RecordListScreen({ entries, onSelectEntry, onWriteForDate }) {
       </View>
 
       {/* 週カレンダー */}
-      <View style={s.weekCalWrap}>
+      <View style={s.weekCalWrap} {...panResponder.panHandlers}>
         <View style={s.weekNavRow}>
           <TouchableOpacity onPress={() => setWeekStart(addDays(weekStart, -7))}>
             <Text style={s.weekNavBtn}>‹</Text>
@@ -517,7 +591,26 @@ function RecordListScreen({ entries, onSelectEntry, onWriteForDate }) {
         </View>
       </View>
 
-
+      {/* 選択日アクション */}
+      {selectedDate && selectedDate <= today && (
+        <View style={s.calActionRow}>
+          <Text style={s.calActionDate}>{formatDate(selectedDate).full}</Text>
+          {entryMap[selectedDate] ? (
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity style={s.calActionBtn} onPress={() => onSelectEntry(entryMap[selectedDate])}>
+                <Text style={s.calActionBtnText}>開く</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.calActionBtn, s.calActionBtnWrite]} onPress={() => onWriteForDate(selectedDate)}>
+                <Text style={[s.calActionBtnText, { color: C.accent }]}>追記する</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity style={[s.calActionBtn, s.calActionBtnWrite]} onPress={() => onWriteForDate(selectedDate)}>
+              <Text style={[s.calActionBtnText, { color: C.accent }]}>この日の日記を書く</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
       {/* アコーディオン */}
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
@@ -564,18 +657,28 @@ function RecordListScreen({ entries, onSelectEntry, onWriteForDate }) {
   );
 }
 
-function DiaryPreviewScreen({ diary, conversation, onContinue, onRestart, onSaved, targetDate }) {
-  const [text, setText] = useState(diary);
-  const [editing, setEditing] = useState(false);
+function DiaryPreviewScreen({ diary, existingText, conversation, onContinue, onRestart, onSaved, targetDate, isUpdate }) {
   const [saving, setSaving] = useState(false);
   const date = targetDate || todayJST();
   const { full } = formatDate(date);
+  // 追記モードの場合は「既存 + \n\n + 追記」を保存
+  // 追記時：既存テキスト末尾の落款を除去して結合（二重落款防止）
+  const strippedExisting = existingText ? existingText.replace(/\n\n— .+$/, '') : null;
+  const saveText = isUpdate && strippedExisting
+    ? `${strippedExisting}\n\n${diary}`
+    : diary;
+  // プレビュー表示用（落款除去済みの既存テキスト）
+  const displayExisting = strippedExisting;
 
   async function save() {
     setSaving(true);
     try {
-      await apiFetch('/diary', { method: 'POST', body: JSON.stringify({ text, date, conversation, moodIdx: 0 }) });
-      onSaved(text);
+      if (isUpdate) {
+        await apiFetch(`/diary/${date}`, { method: 'PUT', body: JSON.stringify({ text: saveText, moodIdx: 0 }) });
+      } else {
+        await apiFetch('/diary', { method: 'POST', body: JSON.stringify({ text: saveText, date, conversation, moodIdx: 0 }) });
+      }
+      onSaved(saveText);
     } catch (e) { Alert.alert('エラー', e.message); }
     setSaving(false);
   }
@@ -587,25 +690,27 @@ function DiaryPreviewScreen({ diary, conversation, onContinue, onRestart, onSave
       </View>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 24 }}>
         <Text style={s.previewDateLabel}>{full}</Text>
-        {editing ? (
-          <TextInput style={s.diaryTextarea} value={text} onChangeText={setText} multiline autoFocus textAlignVertical="top"
-            onBlur={() => setEditing(false)} />
+        {isUpdate && displayExisting ? (
+          <>
+            <Text style={s.diaryTextView}>{displayExisting}</Text>
+            <View style={s.previewAppendDivider}>
+              <Text style={s.previewAppendLabel}>追記</Text>
+            </View>
+            <Text style={[s.diaryTextView, s.previewAppendText]}>{diary}</Text>
+          </>
         ) : (
-          <TouchableOpacity onPress={() => setEditing(true)} activeOpacity={0.8}>
-            <Text style={s.diaryTextView}>{text}</Text>
-            <Text style={{ fontSize: 11, color: C.inkFaint, marginTop: 8 }}>タップして編集</Text>
-          </TouchableOpacity>
+          <Text style={s.diaryTextView}>{diary}</Text>
         )}
       </ScrollView>
 
       {/* 話し直すボタン2種 */}
       <View style={s.previewRetryRow}>
         <TouchableOpacity style={s.previewRetryBtn} onPress={onContinue}>
-          <Text style={s.previewRetryText}>続きを話す</Text>
+          <Text style={s.previewRetryText}>{isUpdate ? 'もっと追記する' : '続きを話す'}</Text>
         </TouchableOpacity>
         <View style={{ width: 1, backgroundColor: C.line }} />
         <TouchableOpacity style={s.previewRetryBtn} onPress={onRestart}>
-          <Text style={s.previewRetryText}>最初から話す</Text>
+          <Text style={s.previewRetryText}>{isUpdate ? '追記をやり直す' : '最初から話す'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -659,25 +764,54 @@ function DiaryDetail({ entry, onBack, onSave }) {
   );
 }
 
-function SettingsScreen({ user, onLogout, onCreateTestData, onDeleteToday, questionCount, onChangeQuestionCount }) {
+const COLOPHON_PRESETS = ['かしこ', '草々', 'またね', 'おやすみ', 'なし'];
+
+const COLOPHON_CLOSINGS = ['かしこ', '草々', 'なし'];
+
+function SettingsScreen({ user, onLogout, onCreateTestData, onDeleteToday, colophonClosing, colophonName, onChangeColophonClosing, onChangeColophonName }) {
+  const preview = colophonClosing === 'なし'
+    ? (colophonName ? `— ${colophonName}` : '（落款なし）')
+    : colophonName
+      ? `— ${colophonClosing} ${colophonName}`
+      : `— ${colophonClosing}`;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.paper }}>
       <View style={s.header}><Text style={s.headerTitle}>設定</Text></View>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
-        <Text style={s.settingsSectionTitle}>会話設定</Text>
+        <Text style={s.settingsSectionTitle}>落款</Text>
+
+        {/* 締め言葉選択 */}
         <View style={s.settingsRow}>
-          <Text style={s.settingsLabel}>AIの質問回数</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <TouchableOpacity onPress={() => onChangeQuestionCount(Math.max(1, questionCount - 1))} style={s.stepperBtn}>
-              <Text style={s.stepperBtnText}>−</Text>
-            </TouchableOpacity>
-            <Text style={s.stepperValue}>{questionCount}回</Text>
-            <TouchableOpacity onPress={() => onChangeQuestionCount(Math.min(5, questionCount + 1))} style={s.stepperBtn}>
-              <Text style={s.stepperBtnText}>＋</Text>
-            </TouchableOpacity>
+          <Text style={s.settingsLabel}>締め言葉</Text>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {COLOPHON_CLOSINGS.map(c => (
+              <TouchableOpacity
+                key={c}
+                style={[s.colophonChip, colophonClosing === c && s.colophonChipActive]}
+                onPress={() => onChangeColophonClosing(c)}
+              >
+                <Text style={[s.colophonChipText, colophonClosing === c && s.colophonChipTextActive]}>{c}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
         </View>
-        <Text style={s.settingsHint}>少ないと早めに日記生成できます。多いとより詳しく話すことができます、1〜5回。</Text>
+
+        {/* 名前入力 */}
+        <View style={s.settingsRow}>
+          <Text style={s.settingsLabel}>名前</Text>
+          <TextInput
+            style={s.colophonInput}
+            value={colophonName}
+            onChangeText={onChangeColophonName}
+            placeholder="光晴、まんだい　など"
+            placeholderTextColor={C.inkFaint}
+            maxLength={20}
+          />
+        </View>
+
+        {/* プレビュー */}
+        <Text style={[s.settingsHint, { marginTop: 8 }]}>日記末尾の表示：{preview}</Text>
         <Text style={[s.settingsSectionTitle, { marginTop: 28 }]}>アカウント</Text>
         <View style={s.settingsRow}>
           <Text style={s.settingsLabel}>プラン</Text>
@@ -721,7 +855,8 @@ export default function App() {
   const [selectedEntry, setSelectedEntry] = useState(null);
   const [pendingDiary, setPendingDiary]   = useState(null);
   const [targetDate, setTargetDate]       = useState(null);
-  const [questionCount, setQuestionCount] = useState(2);
+  const [colophonClosing, setColophonClosing] = useState('かしこ');
+  const [colophonName, setColophonName] = useState('');
   const [toast, setToast]     = useState('');
   const toastOpacity          = useRef(new Animated.Value(0)).current;
 
@@ -754,14 +889,21 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    SecureStore.getItemAsync('tsz_question_count').then(v => {
-      if (v) setQuestionCount(parseInt(v));
+    SecureStore.getItemAsync('tsz_colophon_closing').then(v => {
+      if (v !== null) setColophonClosing(v);
+    });
+    SecureStore.getItemAsync('tsz_colophon_name').then(v => {
+      if (v !== null) setColophonName(v);
     });
   }, []);
 
-  async function handleChangeQuestionCount(n) {
-    setQuestionCount(n);
-    await SecureStore.setItemAsync('tsz_question_count', String(n));
+  async function handleChangeColophonClosing(val) {
+    setColophonClosing(val);
+    await SecureStore.setItemAsync('tsz_colophon_closing', val);
+  }
+  async function handleChangeColophonName(val) {
+    setColophonName(val);
+    await SecureStore.setItemAsync('tsz_colophon_name', val);
   }
 
   useEffect(() => {
@@ -776,7 +918,19 @@ export default function App() {
   }
   function handleWriteForDate(date) { setTargetDate(date); setScreen('chat'); }
   function handleGenerateDone(diaryText, conversation) {
-    setPendingDiary({ text: diaryText, conversation, targetDate });
+    const date = targetDate || todayJST();
+    const existingEntry = entries.find(e => e.date === date);
+    const colophonStr = buildColophon(colophonClosing, colophonName);
+    const textWithColophon = colophonStr
+      ? `${diaryText}\n\n— ${colophonStr}`
+      : diaryText;
+    setPendingDiary({
+      text: textWithColophon,
+      existingText: existingEntry?.text || null,
+      conversation,
+      targetDate,
+      isUpdate: !!existingEntry,
+    });
     setScreen('preview');
   }
   function handleSaved(text) {
@@ -830,12 +984,14 @@ export default function App() {
   if (!authed) return <LoginScreen onLogin={handleLogin} />;
 
   if (screen === 'chat') {
+    const date = targetDate || todayJST();
+    const existingEntry = entries.find(e => e.date === date);
     return (
       <ChatScreen
         onBack={() => { setScreen(null); setTargetDate(null); }}
         onGenerateDone={handleGenerateDone}
         targetDate={targetDate}
-        questionCount={questionCount}
+        existingText={existingEntry?.text || null}
       />
     );
   }
@@ -843,8 +999,10 @@ export default function App() {
     return (
       <DiaryPreviewScreen
         diary={pendingDiary.text}
+        existingText={pendingDiary.existingText}
         conversation={pendingDiary.conversation}
         targetDate={pendingDiary.targetDate}
+        isUpdate={pendingDiary.isUpdate}
         onContinue={() => setScreen('chat')}
         onRestart={() => { setPendingDiary(null); setScreen('chat'); }}
         onSaved={handleSaved}
@@ -869,7 +1027,7 @@ export default function App() {
         <RecordListScreen entries={entries} onSelectEntry={handleSelectEntry} onWriteForDate={handleWriteForDate} />
       )}
       {tab === 'settings' && (
-        <SettingsScreen user={user} onLogout={handleLogout} onCreateTestData={handleCreateTestData} onDeleteToday={handleDeleteToday} questionCount={questionCount} onChangeQuestionCount={handleChangeQuestionCount} />
+        <SettingsScreen user={user} onLogout={handleLogout} onCreateTestData={handleCreateTestData} onDeleteToday={handleDeleteToday} colophonClosing={colophonClosing} colophonName={colophonName} onChangeColophonClosing={handleChangeColophonClosing} onChangeColophonName={handleChangeColophonName} />
       )}
 
       <View style={s.bottomNav}>
@@ -942,7 +1100,10 @@ const s = StyleSheet.create({
   chatInputBar:   { flexDirection: 'row', borderTopWidth: 1, borderTopColor: 'rgba(26,21,16,0.12)', backgroundColor: '#ffffff', paddingVertical: 6, paddingHorizontal: 8, gap: 8, alignItems: 'flex-end' },
   chatInput:      { flex: 1, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, color: '#1a1510', maxHeight: 120, backgroundColor: '#f5f0e8', borderRadius: 20 },
   sendBtn:        { backgroundColor: '#1a1510', width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  previewDateLabel:{ fontSize: 11, color: '#9a8f85', letterSpacing: 2, marginBottom: 20 },
+  previewDateLabel:    { fontSize: 11, color: '#9a8f85', letterSpacing: 2, marginBottom: 20 },
+  previewAppendDivider: { flexDirection: 'row', alignItems: 'center', marginVertical: 20 },
+  previewAppendLabel:   { fontSize: 10, color: '#8b5e3c', letterSpacing: 2, borderWidth: 1, borderColor: '#8b5e3c', paddingHorizontal: 8, paddingVertical: 3 },
+  previewAppendText:    { color: '#4a3f35' },
   previewRetryRow:  { flexDirection: 'row', borderTopWidth: 1, borderTopColor: 'rgba(26,21,16,0.12)', borderBottomWidth: 1, borderBottomColor: 'rgba(26,21,16,0.12)' },
   previewRetryBtn:   { flex: 1, paddingVertical: 13, alignItems: 'center' },
   previewRetryText:  { fontSize: 13, color: '#9a8f85' },
@@ -968,6 +1129,11 @@ const s = StyleSheet.create({
   selEntryBtnText:{ fontSize: 13, color: '#4a3f35' },
   selWriteBtn:    { borderWidth: 1, borderColor: '#8b5e3c', paddingVertical: 10, alignItems: 'center' },
   selWriteBtnText:{ fontSize: 13, color: '#8b5e3c' },
+  calActionRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10, backgroundColor: 'rgba(237,231,217,0.6)', borderBottomWidth: 1, borderBottomColor: 'rgba(26,21,16,0.12)' },
+  calActionDate:    { fontSize: 12, color: '#4a3f35' },
+  calActionBtn:     { paddingHorizontal: 14, paddingVertical: 7, borderWidth: 1, borderColor: 'rgba(26,21,16,0.15)', borderRadius: 99 },
+  calActionBtnWrite:{ borderColor: '#8b5e3c' },
+  calActionBtnText: { fontSize: 12, color: '#4a3f35' },
   accordionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(26,21,16,0.12)' },
   accordionTitle:  { fontSize: 17, fontWeight: '300', color: '#1a1510' },
   accordionCount:  { fontSize: 11, color: '#9a8f85' },
@@ -995,6 +1161,12 @@ const s = StyleSheet.create({
   stepperBtnText: { fontSize: 18, color: '#4a3f35', lineHeight: 22 },
   stepperValue:   { fontSize: 15, color: '#1a1510', minWidth: 36, textAlign: 'center' },
   settingsHint:   { fontSize: 11, color: '#9a8f85', marginTop: 6, marginBottom: 8, lineHeight: 18 },
+  colophonInput:   { fontSize: 14, color: '#1a1510', borderBottomWidth: 1, borderBottomColor: 'rgba(26,21,16,0.2)', paddingVertical: 4, minWidth: 120, textAlign: 'right' },
+  colophonPresets: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingVertical: 12 },
+  colophonChip:     { borderWidth: 1, borderColor: 'rgba(26,21,16,0.2)', borderRadius: 99, paddingHorizontal: 14, paddingVertical: 6 },
+  colophonChipActive: { borderColor: '#8b5e3c', backgroundColor: 'rgba(139,94,60,0.08)' },
+  colophonChipText:   { fontSize: 13, color: '#9a8f85' },
+  colophonChipTextActive: { color: '#8b5e3c' },
   toast:           { position: 'absolute', bottom: 80, alignSelf: 'center', backgroundColor: '#1a1510', paddingHorizontal: 20, paddingVertical: 10 },
   testBtn:         { borderWidth: 1, borderColor: '#9a8f85', padding: 12, alignItems: 'center' },
   testBtnText:     { fontSize: 13, color: '#9a8f85' },
