@@ -332,6 +332,10 @@ function ChatScreen({ onBack, onGenerateDone, targetDate, questionCount = 2, exi
       }),
     });
     const data = await res.json();
+    if (data.type === 'error') {
+      console.error('Claude API error:', JSON.stringify(data.error));
+      throw new Error(data.error?.message || 'Claude APIエラー');
+    }
     return data.content?.[0]?.text || 'すみません、もう一度答えてください。';
   }
 
@@ -948,23 +952,26 @@ export default function App() {
   }
   async function handleCreateTestData() {
     const TEST_TEXTS = [
-      '今日は朝から晴れだった。通勤電車の中でふと同僚のことを思い出して、連絡が途絶えたままになっていることに気がついた。仕事の合間に少し時間ができたので返信した。小さなことだけど、すっきりした。',
-      'ミーティングが二つ続きの一日だった。最後の会議が終わったときにはもう首が痛くなっていた。現実的に疲れた感じがする。なのに帰りに寄ったコーヒー屋で騒ぐ小さな声で来週の楽しみにすることにした。',
-      '今日は時間をとって開発に集中できた。難しい問題につきあたっていたけど、小さな突破口が見つかった感じがする。来日またも続きをやってみる。',
+      '今日はチームのメンバーが書いたCloudFormationのレビューをした。インフラエンジニアとして15年やってきた経験が役に立つ瞬間だ。夜は副業のReact Nativeアプリの開発を2時間。妻が「またパソコンしてるの」と言っていたけど、子供が寝てからの時間は自分の時間だと思っている。',
+      'AWSのLambdaで詰まっていた問題がようやく解決した。SIerのマネージャー業務と副業の開発を両立するのは正直しんどいけど、手を動かしている時間が一番楽しい。息子が「パパ何作ってるの」と聞いてきたので日記アプリを作っていると話したら「すごい」と言ってくれた。',
+      '本業でプロジェクトの見積もり資料を作った。20人規模のチームをまとめながら自分でも技術を追い続けるのはなかなか大変だ。帰宅後、副業のクラウドワークスに新しい案件の提案文を書いた。AIと自動化の案件が増えてきていて、自分のスキルが活かせると感じている。趣味のアプリ開発が仕事になりつつある。',
     ];
+    // 既存データを全削除してからペルソナデータを投入
+    for (const e of entries) {
+      try { await apiFetch(`/diary/${e.date}`, { method: 'DELETE' }); } catch {}
+    }
     let created = 0;
-    for (let i = 1; i <= 7; i++) {
+    for (let i = 1; i <= 3; i++) {
       const d = new Date(Date.now() + 9 * 3600000 - i * 86400000);
       const date = d.toISOString().slice(0, 10);
-      if (entries.find(e => e.date === date)) continue;
       try {
-        await apiFetch('/diary', { method: 'POST', body: JSON.stringify({ text: TEST_TEXTS[(i-1) % TEST_TEXTS.length], date, moodIdx: 0 }) });
+        await apiFetch('/diary', { method: 'POST', body: JSON.stringify({ text: TEST_TEXTS[i-1], date, moodIdx: 0 }) });
         created++;
       } catch {}
     }
     const data = await apiFetch('/diary');
     setEntries(data.entries || []);
-    showToast(`${created}日分のテストデータを作成しました`);
+    showToast(`ペルソナデータを${created}日分作成しました`);
   }
   async function handleDeleteToday() {
     const today = todayJST();
