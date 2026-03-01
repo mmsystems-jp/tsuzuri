@@ -2,7 +2,7 @@
 import * as esbuild from 'esbuild';
 import { rmSync, mkdirSync } from 'fs';
 
-const lambdas = ['auth', 'diary', 'stripe'];
+const lambdas = ['auth', 'diary', 'stripe', 'notify'];
 const external = ['@aws-sdk/*']; // Lambda実行環境に含まれるので除外
 
 rmSync('dist', { recursive: true, force: true });
