@@ -83,7 +83,7 @@ async function createUserFromLine(lineUserId: string, displayName: string, pictu
       ...(pictureUrl ? { pictureUrl: { S: pictureUrl } } : {}),
       plan:          { S: 'free' },
       theme:         { S: 'light' },
-      notifyEnabled: { BOOL: false },
+      notifyEnabled: { BOOL: true },
       notifyHour:    { N: '21' },
       streak:        { N: '0' },
       totalEntries:  { N: '0' },
@@ -139,7 +139,7 @@ async function createUser(email: string): Promise<string> {
       email:         { S: email.toLowerCase() },
       plan:          { S: 'free' },
       theme:         { S: 'light' },
-      notifyEnabled: { BOOL: false },
+      notifyEnabled: { BOOL: true },
       notifyHour:    { N: '21' },
       streak:        { N: '0' },
       totalEntries:  { N: '0' },
@@ -156,6 +156,27 @@ export const handler = async (event: any): Promise<APIGatewayProxyResult> => {
   if (method === 'OPTIONS') return ok({});
 
   const body = event.body ? JSON.parse(event.body) : {};
+
+  // LIFF経由でネイティブアプリを開く
+  if (path.endsWith('/auth/open') && method === 'GET') {
+    const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>綴りを開く</title></head>
+<body>
+<script>
+  window.location.href = 'jp.mmsystems.cho://';
+  setTimeout(function() {
+    document.body.innerHTML = '<p style="font-family:sans-serif;text-align:center;margin-top:40px">綴りアプリを開いています...</p>';
+  }, 500);
+<\/script>
+</body>
+</html>`;
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      body: html,
+    };
+  }
 
   // LINE OAuthコールバック（ネイティブアプリ用）
   if (path.endsWith('/auth/line/callback') && method === 'GET') {

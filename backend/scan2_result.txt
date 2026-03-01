@@ -1,0 +1,48 @@
+﻿{
+    "Items": [
+        {
+            "theme": {
+                "S": "light"
+            },
+            "notifyHour": {
+                "N": "21"
+            },
+            "lineUserId": {
+                "S": "Ua96950f706c17d930cf1e08224c9fd22"
+            },
+            "streak": {
+                "N": "0"
+            },
+            "plan": {
+                "S": "free"
+            },
+            "pictureUrl": {
+                "S": "https://profile.line-scdn.net/0hqXsOMZTZLndeNjCwMjFQSS5mLR19R3dldVQyQWo0eBBnUm4kJwdkGGNmc0AzATpxJlIyRGxicBB8QSwkLlcFEhtxNkEWRBpTOSogeBdCJkNiaDonET4xdzVxNT45VBkpCAdlEglKdiAlfm5SNyMGcCJ-eTBhcABaG2FCIVsEQPQxNFkic1FpEWMzd0Lq"
+            },
+            "createdAt": {
+                "S": "2026-03-01T05:40:55.739Z"
+            },
+            "displayName": {
+                "S": "萬代 光晴"
+            },
+            "totalChars": {
+                "N": "0"
+            },
+            "totalEntries": {
+                "N": "0"
+            },
+            "SK": {
+                "S": "PROFILE"
+            },
+            "notifyEnabled": {
+                "BOOL": false
+            },
+            "PK": {
+                "S": "USER#umm7bnh1y8hi1ae"
+            }
+        }
+    ],
+    "Count": 1,
+    "ScannedCount": 22,
+    "ConsumedCapacity": null
+}

@@ -4,7 +4,7 @@ Write-Host "=== Tsuzuri Deploy ===" -ForegroundColor Cyan
 
 $profile = "mmsystems"
 $LINE_CHANNEL_SECRET = "e79ea0ffe3244d8344124c2aa5b3ba3a"
-$LINE_MESSAGING_TOKEN = "wiIlu4y7s7Q9wHyqZRXRLp+/ldqEXvjFKfPq4klLU4ZpZHuxvYMvNIMWgZw30bl+4xTkZ/pXtroYLZyXuupHX9HBzkfgbzywTstgHR5ouBhBt8ZOfuKXjQgB7hP6jWVlG53bA1DYPY9xotzTgPPUvQdB04t89/1o/w1cDnyilFU="
+$LINE_MESSAGING_TOKEN = "wiIlu4y7s7Q9wHyqZRXRLp+/ldqEXvjFKfPq4klLU4ZpZHuxvYMvNIMWgZw30bl+4xTkZ/pXtroYLZyXuupHX9HBzkfgbzywTstgHR5ouBhBt8ZOfuKXjQgB7hP6jWVlG53bA1DYPY9xotzTgPPUvQdB04t89/1O/w1cDnyilFU="
 
 # 1. Build
 Write-Host "1. Build..." -ForegroundColor Yellow
