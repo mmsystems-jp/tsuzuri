@@ -1,5 +1,29 @@
 # Tsuzuri WORK LOG
 
+## 2026-03-01
+
+### LINE ログイン修正・LINE 通知機能準備
+
+**変更ファイル:**
+- mobile/App.js: useProxy → WebBrowser.openAuthSessionAsync + Linking ディープリンク方式に変更
+- mobile/eas.json: production env に EXPO_PUBLIC_ANTHROPIC_API_KEY 追加
+- backend/lambda/auth/index.ts: /auth/line/callback エンドポイント追加、httpsPost 関数追加
+- backend/deploy.ps1: ステップ4（auth env vars 更新）追加
+
+**インフラ変更:**
+- LINE コンソール コールバック URL を Lambda URL に変更
+- Lambda tsuzuri-prod-auth に LINE_LOGIN_CHANNEL_SECRET 環境変数追加
+- 綴り LINE 公式アカウント作成（@983bolpv）
+
+**ビルド:**
+- Build 16: LINE ログイン修正版（TestFlight 配信済み）
+- Build 17: Claude API キー追加版（eas build 実行中）
+
+**確認済み:**
+- LINE ログイン ✅
+- Face ID ✅
+- チャット・AI返答 ❌（Build 17 待ち）
+
 ## 2026-02-28
 
 ### AI記憶機能実装セッション

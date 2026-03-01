@@ -2,6 +2,9 @@
 
 Write-Host "=== Tsuzuri Deploy ===" -ForegroundColor Cyan
 
+$profile = "mmsystems"
+$LINE_CHANNEL_SECRET = "e79ea0ffe3244d8344124c2aa5b3ba3a"
+
 # 1. Build
 Write-Host "1. Build..." -ForegroundColor Yellow
 npm run build
@@ -20,7 +23,6 @@ foreach ($l in $lambdas) {
 
 # 3. Update Lambda
 Write-Host "3. Update Lambda..." -ForegroundColor Yellow
-$profile = "mmsystems"
 foreach ($l in $lambdas) {
     $result = aws lambda update-function-code `
         --function-name "tsuzuri-prod-$l" `
@@ -32,5 +34,33 @@ foreach ($l in $lambdas) {
         Write-Host "  tsuzuri-prod-$l failed: $result" -ForegroundColor Red
     }
 }
+
+# 4. auth Lambda の環境変数に LINE_LOGIN_CHANNEL_SECRET を追加
+Write-Host "4. Update auth env vars..." -ForegroundColor Yellow
+$envFile = "env_update.json"
+$envContent = @"
+{
+  "Variables": {
+    "LINE_LOGIN_CHANNEL_ID": "2009194648",
+    "TABLE_NAME": "tsuzuri-prod-main",
+    "FROM_EMAIL": "noreply@tsuzuri.app",
+    "FRONTEND_URL": "https://tsuzuri.app",
+    "LINE_LOGIN_CHANNEL_SECRET": "$LINE_CHANNEL_SECRET"
+  }
+}
+"@
+[System.IO.File]::WriteAllText("$PWD\$envFile", $envContent, (New-Object System.Text.UTF8Encoding $false))
+
+aws lambda update-function-configuration `
+    --function-name "tsuzuri-prod-auth" `
+    --environment "file://$envFile" `
+    --profile $profile | Out-Null
+
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "  auth env updated" -ForegroundColor Green
+} else {
+    Write-Host "  auth env update failed" -ForegroundColor Red
+}
+Remove-Item $envFile -ErrorAction SilentlyContinue
 
 Write-Host "=== Deploy Done ===" -ForegroundColor Cyan

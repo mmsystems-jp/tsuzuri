@@ -28,6 +28,19 @@ function httpsGet(hostname: string, path: string, headers: Record<string, string
   });
 }
 
+function httpsPost(hostname: string, path: string, body: string, headers: Record<string, string> = {}): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const req = https.request({ hostname, path, method: 'POST', headers: { 'Content-Length': Buffer.byteLength(body).toString(), ...headers } }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => { try { resolve(JSON.parse(data)); } catch { reject(new Error('JSON parse error')); } });
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
 async function verifyLineAccessToken(accessToken: string): Promise<{ client_id: string } | null> {
   try {
     return await httpsGet('api.line.me', `/oauth2/v2.1/verify?access_token=${accessToken}`);
@@ -143,6 +156,75 @@ export const handler = async (event: any): Promise<APIGatewayProxyResult> => {
   if (method === 'OPTIONS') return ok({});
 
   const body = event.body ? JSON.parse(event.body) : {};
+
+  // LINE OAuthコールバック（ネイティブアプリ用）
+  if (path.endsWith('/auth/line/callback') && method === 'GET') {
+    const qs = event.queryStringParameters || {};
+    const code = qs.code;
+    const redirectUri = `https://o5k36gp6jd.execute-api.ap-northeast-1.amazonaws.com/auth/line/callback`;
+    const lineChannelSecret = process.env.LINE_LOGIN_CHANNEL_SECRET || '';
+
+    if (!code) {
+      return { statusCode: 302, headers: { Location: 'jp.mmsystems.cho://auth?error=no_code', ...cors }, body: '' };
+    }
+
+    try {
+      // コードをアクセストークンに交換
+      const tokenBody = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri,
+        client_id: LINE_LOGIN_CHANNEL_ID,
+        client_secret: lineChannelSecret,
+      }).toString();
+
+      const tokenData = await httpsPost('api.line.me', '/oauth2/v2.1/token', tokenBody, {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      });
+
+      if (!tokenData.access_token) {
+        return { statusCode: 302, headers: { Location: 'jp.mmsystems.cho://auth?error=token_failed', ...cors }, body: '' };
+      }
+
+      // プロフィール取得
+      const profile = await getLineProfile(tokenData.access_token);
+      if (!profile) {
+        return { statusCode: 302, headers: { Location: 'jp.mmsystems.cho://auth?error=profile_failed', ...cors }, body: '' };
+      }
+
+      const { userId: lineUserId, displayName, pictureUrl } = profile;
+
+      // ユーザー検索または新規作成
+      let userId: string;
+      const existing = await findUserByLineId(lineUserId);
+      if (existing) {
+        userId = existing.userId;
+      } else {
+        userId = await createUserFromLine(lineUserId, displayName, pictureUrl);
+      }
+
+      // セッション生成
+      const token = generateToken(userId);
+      const sessionTTL = Math.floor(Date.now() / 1000) + SESSION_TTL_DAYS * 24 * 60 * 60;
+      await dynamo.send(new PutItemCommand({
+        TableName: TABLE,
+        Item: {
+          PK:        { S: `USER#${userId}` },
+          SK:        { S: `SESSION#${token}` },
+          token:     { S: token },
+          expiresAt: { N: String(sessionTTL) },
+          createdAt: { S: new Date().toISOString() },
+        },
+      }));
+
+      // アプリへリダイレクト
+      const deepLink = `jp.mmsystems.cho://auth?token=${encodeURIComponent(token)}&displayName=${encodeURIComponent(displayName)}&isNew=${!existing}`;
+      return { statusCode: 302, headers: { Location: deepLink, ...cors }, body: '' };
+
+    } catch (e) {
+      return { statusCode: 302, headers: { Location: 'jp.mmsystems.cho://auth?error=server_error', ...cors }, body: '' };
+    }
+  }
 
   // LINE認証
   if (path.endsWith('/auth/line') && method === 'POST') {

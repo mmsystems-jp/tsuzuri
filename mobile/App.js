@@ -7,17 +7,10 @@ import {
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as WebBrowser from 'expo-web-browser';
-import * as AuthSession from 'expo-auth-session';
-
-WebBrowser.maybeCompleteAuthSession();
+import * as Linking from 'expo-linking';
 
 const LINE_CHANNEL_ID = '2009194648';
-const LINE_CHANNEL_SECRET = 'e79ea0ffe3244d8344124c2aa5b3ba3a';
-const LINE_REDIRECT_URI = AuthSession.makeRedirectUri({ useProxy: true });
-const LINE_DISCOVERY = {
-  authorizationEndpoint: 'https://access.line.me/oauth2/v2.1/authorize',
-  tokenEndpoint: 'https://api.line.me/oauth2/v2.1/token',
-};
+const LINE_CALLBACK_URL = 'https://o5k36gp6jd.execute-api.ap-northeast-1.amazonaws.com/auth/line/callback';
 
 const API_URL = 'https://o5k36gp6jd.execute-api.ap-northeast-1.amazonaws.com';
 const ANTHROPIC_KEY = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY || '';
@@ -208,43 +201,46 @@ function LoginScreen({ onLogin }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const [request, response, promptAsync] = AuthSession.useAuthRequest(
-    { clientId: LINE_CHANNEL_ID, scopes: ['profile', 'openid'], redirectUri: LINE_REDIRECT_URI },
-    LINE_DISCOVERY
-  );
-
   useEffect(() => {
-    if (response?.type === 'success') {
-      exchangeCodeForToken(response.params.code);
-    } else if (response?.type === 'error' || response?.type === 'cancel') {
-      if (response.type === 'error') setError('LINEログインに失敗しました');
-      setLoading(false);
-    }
-  }, [response]);
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      handleDeepLink(url);
+    });
+    return () => sub.remove();
+  }, []);
 
-  async function exchangeCodeForToken(code) {
+  async function handleDeepLink(url) {
+    if (!url || !url.startsWith('jp.mmsystems.cho://auth')) return;
+    const parsed = Linking.parse(url);
+    const { token, error: errParam } = parsed.queryParams || {};
+    if (errParam) {
+      setError('LINEログインに失敗しました: ' + errParam);
+      setLoading(false);
+      return;
+    }
+    if (token) {
+      try {
+        await SecureStore.setItemAsync('tsz_token', token);
+        const data = await apiFetch('/auth/me');
+        onLogin(data);
+      } catch (e) {
+        setError('ログインに失敗しました。もう一度お試しください');
+        setLoading(false);
+      }
+    }
+  }
+
+  async function handleLineLogin() {
+    setError('');
     setLoading(true);
-    try {
-      const params = new URLSearchParams({
-        grant_type: 'authorization_code', code,
-        redirect_uri: LINE_REDIRECT_URI,
-        client_id: LINE_CHANNEL_ID, client_secret: LINE_CHANNEL_SECRET,
-      });
-      const tokenRes = await fetch('https://api.line.me/oauth2/v2.1/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params.toString(),
-      });
-      const tokenData = await tokenRes.json();
-      if (!tokenData.access_token) throw new Error('トークン取得に失敗しました');
-      const data = await apiFetch('/auth/line', {
-        method: 'POST',
-        body: JSON.stringify({ accessToken: tokenData.access_token }),
-      });
-      await SecureStore.setItemAsync('tsz_token', data.token);
-      onLogin(data);
-    } catch (e) {
-      setError(e.message || 'ログインに失敗しました。もう一度お試しください');
+    const state = Math.random().toString(36).substring(2);
+    const authUrl = `https://access.line.me/oauth2/v2.1/authorize?` +
+      `response_type=code&client_id=${LINE_CHANNEL_ID}` +
+      `&redirect_uri=${encodeURIComponent(LINE_CALLBACK_URL)}` +
+      `&state=${state}&scope=profile%20openid`;
+    const result = await WebBrowser.openAuthSessionAsync(authUrl, 'jp.mmsystems.cho://');
+    if (result.type === 'success') {
+      await handleDeepLink(result.url);
+    } else {
       setLoading(false);
     }
   }
@@ -258,9 +254,9 @@ function LoginScreen({ onLogin }) {
           <View style={s.loginCard}>
             {!!error && <Text style={[s.errorMsg, { marginBottom: 16 }]}>{error}</Text>}
             <TouchableOpacity
-              style={[s.lineLoginBtn, (loading || !request) && s.btnDisabled]}
-              onPress={() => { setError(''); setLoading(true); promptAsync(); }}
-              disabled={loading || !request}
+              style={[s.lineLoginBtn, loading && s.btnDisabled]}
+              onPress={handleLineLogin}
+              disabled={loading}
             >
               <Text style={s.lineLoginBtnText}>{loading ? 'ログイン中...' : 'LINEでログイン'}</Text>
             </TouchableOpacity>
