@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, SafeAreaView, KeyboardAvoidingView, Platform,
-  Animated, ActivityIndicator, Alert, PanResponder
+  Animated, ActivityIndicator, Alert, PanResponder, Switch
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -287,7 +287,7 @@ function ChatScreen({ onBack, onGenerateDone, targetDate, questionCount = 2, exi
 
   // 起動時にプロフィール・直近日記を取得
   useEffect(() => {
-    apiFetch('/profile').then(data => {
+    apiFetch('/diary/profile').then(data => {
       if (data.aiProfile) {
         try { setUserProfile(JSON.parse(data.aiProfile)); } catch {}
       }
@@ -769,6 +769,21 @@ const COLOPHON_PRESETS = ['かしこ', '草々', 'またね', 'おやすみ', '�
 const COLOPHON_CLOSINGS = ['かしこ', '草々', 'なし'];
 
 function SettingsScreen({ user, onLogout, onCreateTestData, onDeleteToday, colophonClosing, colophonName, onChangeColophonClosing, onChangeColophonName }) {
+  const [notifyEnabled, setNotifyEnabled] = useState(!!user?.notifyEnabled);
+
+  async function handleNotifyToggle(value) {
+    setNotifyEnabled(value);
+    try {
+      await apiFetch('/auth/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ notifyEnabled: value }),
+      });
+    } catch {
+      // 失敗したら元に戻す
+      setNotifyEnabled(!value);
+    }
+  }
+
   const preview = colophonClosing === 'なし'
     ? (colophonName ? `— ${colophonName}` : '（落款なし）')
     : colophonName
@@ -812,6 +827,17 @@ function SettingsScreen({ user, onLogout, onCreateTestData, onDeleteToday, colop
 
         {/* プレビュー */}
         <Text style={[s.settingsHint, { marginTop: 8 }]}>日記末尾の表示：{preview}</Text>
+        <Text style={[s.settingsSectionTitle, { marginTop: 28 }]}>通知</Text>
+        <View style={s.settingsRow}>
+          <Text style={s.settingsLabel}>毎日21時にリマインド</Text>
+          <Switch
+            value={notifyEnabled}
+            onValueChange={handleNotifyToggle}
+            trackColor={{ false: C.line, true: C.accent }}
+            thumbColor={C.white}
+          />
+        </View>
+        <Text style={s.settingsHint}>LINEで今日の日記を書くよう通知が届きます</Text>
         <Text style={[s.settingsSectionTitle, { marginTop: 28 }]}>アカウント</Text>
         <View style={s.settingsRow}>
           <Text style={s.settingsLabel}>プラン</Text>

@@ -447,5 +447,24 @@ export const handler = async (event: any): Promise<APIGatewayProxyResult> => {
     return ok({ message: 'ログアウトしました' });
   }
 
+  // 設定更新（通知ON/OFFなど）
+  if (path.endsWith('/auth/settings') && method === 'PATCH') {
+    const authHeader = event.headers?.Authorization || event.headers?.authorization || '';
+    const userId = await verifySession(authHeader);
+    if (!userId) return err('Unauthorized', 401);
+
+    const { notifyEnabled } = body;
+    if (typeof notifyEnabled !== 'boolean') return err('notifyEnabled は boolean で指定してください');
+
+    await dynamo.send(new UpdateItemCommand({
+      TableName: TABLE,
+      Key: { PK: { S: `USER#${userId}` }, SK: { S: 'PROFILE' } },
+      UpdateExpression: 'SET notifyEnabled = :ne',
+      ExpressionAttributeValues: { ':ne': { BOOL: notifyEnabled } },
+    }));
+
+    return ok({ notifyEnabled });
+  }
+
   return err('Not found', 404);
 };
