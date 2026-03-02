@@ -6,11 +6,7 @@ import {
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
-import * as WebBrowser from 'expo-web-browser';
-import * as Linking from 'expo-linking';
-
-const LINE_CHANNEL_ID = '2009194648';
-const LINE_CALLBACK_URL = 'https://o5k36gp6jd.execute-api.ap-northeast-1.amazonaws.com/auth/line/callback';
+import * as AppleAuthentication from 'expo-apple-authentication';
 
 const API_URL = 'https://o5k36gp6jd.execute-api.ap-northeast-1.amazonaws.com';
 const ANTHROPIC_KEY = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY || '';
@@ -202,46 +198,34 @@ function LoginScreen({ onLogin }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    const sub = Linking.addEventListener('url', ({ url }) => {
-      handleDeepLink(url);
-    });
-    return () => sub.remove();
-  }, []);
-
-  async function handleDeepLink(url) {
-    if (!url || !url.startsWith('jp.mmsystems.cho://auth')) return;
-    const parsed = Linking.parse(url);
-    const { token, error: errParam } = parsed.queryParams || {};
-    if (errParam) {
-      setError('LINEログインに失敗しました: ' + errParam);
-      setLoading(false);
-      return;
-    }
-    if (token) {
-      try {
-        await SecureStore.setItemAsync('tsz_token', token);
-        const data = await apiFetch('/auth/me');
-        onLogin(data);
-      } catch (e) {
-        setError('ログインに失敗しました。もう一度お試しください');
-        setLoading(false);
-      }
-    }
-  }
-
-  async function handleLineLogin() {
+  async function handleAppleLogin() {
     setError('');
     setLoading(true);
-    const state = Math.random().toString(36).substring(2);
-    const authUrl = `https://access.line.me/oauth2/v2.1/authorize?` +
-      `response_type=code&client_id=${LINE_CHANNEL_ID}` +
-      `&redirect_uri=${encodeURIComponent(LINE_CALLBACK_URL)}` +
-      `&state=${state}&scope=profile%20openid`;
-    const result = await WebBrowser.openAuthSessionAsync(authUrl, 'jp.mmsystems.cho://');
-    if (result.type === 'success') {
-      await handleDeepLink(result.url);
-    } else {
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      const res = await fetch(`${API_URL}/auth/apple`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identityToken: credential.identityToken,
+          user: credential.user,
+          fullName: credential.fullName,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.token) throw new Error(data.message || 'ログイン失敗');
+      await SecureStore.setItemAsync('tsz_token', data.token);
+      const me = await apiFetch('/auth/me');
+      onLogin(me);
+    } catch (e) {
+      if (e.code !== 'ERR_REQUEST_CANCELED') {
+        setError('サインインに失敗しました。もう一度お試しください');
+      }
       setLoading(false);
     }
   }
@@ -254,13 +238,13 @@ function LoginScreen({ onLogin }) {
           <Text style={s.loginTagline}>話すだけで、日記になる</Text>
           <View style={s.loginCard}>
             {!!error && <Text style={[s.errorMsg, { marginBottom: 16 }]}>{error}</Text>}
-            <TouchableOpacity
-              style={[s.lineLoginBtn, loading && s.btnDisabled]}
-              onPress={handleLineLogin}
-              disabled={loading}
-            >
-              <Text style={s.lineLoginBtnText}>{loading ? 'ログイン中...' : 'LINEでログイン'}</Text>
-            </TouchableOpacity>
+            <AppleAuthentication.AppleAuthenticationButton
+              buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE}
+              cornerRadius={0}
+              style={s.appleLoginBtn}
+              onPress={handleAppleLogin}
+            />
             <Text style={s.loginHint}>はじめての方はそのままアカウント作成されます</Text>
           </View>
         </View>
@@ -1152,8 +1136,7 @@ const s = StyleSheet.create({
   colophonChipText:   { fontSize: 13, color: '#9a8f85' },
   colophonChipTextActive: { color: '#8b5e3c' },
   toast:           { position: 'absolute', bottom: 80, alignSelf: 'center', backgroundColor: '#1a1510', paddingHorizontal: 20, paddingVertical: 10 },
-  lineLoginBtn:     { backgroundColor: '#06C755', padding: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 10 },
-  lineLoginBtnText: { color: '#ffffff', fontSize: 15, fontWeight: '600', letterSpacing: 0.5 },
+  appleLoginBtn:    { width: '100%', height: 48 },
   homeGreeting:     { fontSize: 13, color: '#9a8f85', letterSpacing: 0.5 },
   homeCard:         { backgroundColor: '#ffffff', padding: 28, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(26,21,16,0.08)', shadowColor: '#1a1510', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 12, elevation: 2 },
   homeCardSub:      { fontSize: 10, color: '#9a8f85', letterSpacing: 2, marginBottom: 16 },

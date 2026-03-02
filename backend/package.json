@@ -8,6 +8,7 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.0.0",
     "@aws-sdk/client-ses": "^3.0.0",
+    "apple-signin-auth": "^2.0.0",
     "stripe": "^14.0.0"
   },
   "devDependencies": {
