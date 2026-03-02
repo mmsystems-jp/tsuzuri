@@ -765,11 +765,9 @@ function DiaryDetail({ entry, onBack, onSave }) {
   );
 }
 
-const COLOPHON_PRESETS = ['かしこ', '草々', 'またね', 'おやすみ', 'なし'];
-
 const COLOPHON_CLOSINGS = ['かしこ', '草々', 'なし'];
 
-function SettingsScreen({ user, onLogout, onCreateTestData, onDeleteToday, colophonClosing, colophonName, onChangeColophonClosing, onChangeColophonName }) {
+function SettingsScreen({ user, onLogout, colophonClosing, colophonName, onChangeColophonClosing, onChangeColophonName }) {
   const [notifyEnabled, setNotifyEnabled] = useState(!!user?.notifyEnabled);
 
   async function handleNotifyToggle(value) {
@@ -842,7 +840,7 @@ function SettingsScreen({ user, onLogout, onCreateTestData, onDeleteToday, colop
         <Text style={[s.settingsSectionTitle, { marginTop: 28 }]}>アカウント</Text>
         <View style={s.settingsRow}>
           <Text style={s.settingsLabel}>プラン</Text>
-          <Text style={s.settingsValue}>Standard（テスト中）</Text>
+          <Text style={s.settingsValue}>Standard</Text>
         </View>
         <View style={s.settingsRow}>
           <Text style={s.settingsLabel}>記録した日数</Text>
@@ -855,22 +853,10 @@ function SettingsScreen({ user, onLogout, onCreateTestData, onDeleteToday, colop
         <TouchableOpacity style={s.logoutBtn} onPress={onLogout}>
           <Text style={s.logoutBtnText}>ロック（次回はFace IDで開く）</Text>
         </TouchableOpacity>
-        <Text style={[s.settingsSectionTitle, { marginTop: 28 }]}>開発テスト</Text>
-        <TouchableOpacity style={s.testBtn} onPress={onCreateTestData}>
-          <Text style={s.testBtnText}>テスト日記を作成（過去7日分）</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[s.testBtn, { marginTop: 8 }]} onPress={onDeleteToday}>
-          <Text style={s.testBtnText}>今日の日記を削除</Text>
-        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
 }
-
-const TABS = [
-  { key: 'records',  label: '記録' },
-  { key: 'settings', label: '設定' },
-];
 
 export default function App() {
   const [authed, setAuthed]   = useState(false);
@@ -941,7 +927,7 @@ export default function App() {
   function handleLogin(data) { setUser(data); setAuthed(true); }
   async function handleLogout() {
     setAuthed(false); setUser(null); setEntries([]);
-    setTab('chat'); setScreen(null);
+    setTab('home'); setScreen(null);
   }
   function handleWriteForDate(date) { setTargetDate(date); setScreen('chat'); }
   function handleGenerateDone(diaryText, conversation) {
@@ -973,42 +959,6 @@ export default function App() {
     setSelectedEntry(updated);
     showToast('更新しました');
   }
-  async function handleCreateTestData() {
-    const TEST_TEXTS = [
-      '本業でプロジェクトのキックオフがあった。20人を超えるチームのマネージャーとして、スケジュールとメンバーのコンディション両方を見ながら進めるのはいつも神経を使う。帰りの電車で副業のアプリのUI設計をスケッチしていたら、あっという間に最寄り駅を過ぎてしまった。こういう時間が一番好きだ。',
-      '夜、子供を寝かしつけた後に副業の開発を2時間。DynamoDBのGSI設計で詰まっていた箇所がようやく解けた。設計パターンを一つ自分のものにした感覚があって、地味に嬉しい。妻には「また深夜まで」と言われたけど、この時間がないと自分じゃない気がする。もう少しうまくバランスを取らないとな。',
-      '今日は息子の授業参観だった。仕事を早抜けして学校へ。教室で一生懸命手を挙げている姿を見て、なんとも言えない気持ちになった。こういう場面を仕事を理由に逃したくない。副業を本業にするのはまだ先の話だけど、時間の使い方を根本から変える必要があると改めて感じた一日だった。',
-      'AWSのLambdaコールドスタート問題を調べていたら3時間溶けた。本業のSIer業務でも活かせる知識なので無駄ではないが、副業の進捗がまったく進まなかった。土日でリカバリするか。最近、副業と本業と家族の時間の三つ巴が続いている。どれも削りたくないから、削るなら睡眠か、という悪循環。',
-      '副業のアプリの初版をApp Storeに申請した。審査が通るかどうかドキドキしながら、本業の資料作成を並行して進めた。こういうマルチタスク力はSIerで鍛えられたと思う。帰宅後に妻と近所を散歩した。最近ゆっくり話す機会が少なかったので、30分歩いただけで気持ちがリセットされた。',
-      'チームのメンバーが書いたCloudFormationのテンプレートをレビューした。経験の浅いメンバーのコードでも、ちゃんと意図を読み取ってフィードバックするのがマネージャーの仕事だと思っている。夜は副業の収益計算をした。まだ副業だけで食べていくには遠いけど、数字が少しずつ動いているのは事実だ。',
-      '今日で副業を始めてちょうど1年になる。最初はクラウドワークスで小さな案件をこなすだけだったのが、今は自分でアプリを作ってリリースするところまで来た。本業のマネージャー経験とエンジニアのスキルが組み合わさると、思ったより戦えると気づいた1年だった。来年は月5万を副業で安定させたい。',
-    ];
-    // 既存データを全削除してからペルソナデータを投入
-    for (const e of entries) {
-      try { await apiFetch(`/diary/${e.date}`, { method: 'DELETE' }); } catch {}
-    }
-    let created = 0;
-    for (let i = 1; i <= 7; i++) {
-      const d = new Date(Date.now() + 9 * 3600000 - i * 86400000);
-      const date = d.toISOString().slice(0, 10);
-      try {
-        await apiFetch('/diary', { method: 'POST', body: JSON.stringify({ text: TEST_TEXTS[i-1], date, moodIdx: 0 }) });
-        created++;
-      } catch {}
-    }
-    const data = await apiFetch('/diary');
-    setEntries(data.entries || []);
-    showToast(`ペルソナデータを${created}日分作成しました`);
-  }
-  async function handleDeleteToday() {
-    const today = todayJST();
-    try {
-      await apiFetch(`/diary/${today}`, { method: 'DELETE' });
-      setEntries(prev => prev.filter(e => e.date !== today));
-      showToast('今日の日記を削除しました');
-    } catch (e) { showToast('削除失敗: ' + e.message); }
-  }
-
   if (checking) return (
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.paper }}>
       <ActivityIndicator color={C.inkFaint} />
@@ -1061,7 +1011,7 @@ export default function App() {
         <RecordListScreen entries={entries} onSelectEntry={handleSelectEntry} onWriteForDate={handleWriteForDate} />
       )}
       {tab === 'settings' && (
-        <SettingsScreen user={user} onLogout={handleLogout} onCreateTestData={handleCreateTestData} onDeleteToday={handleDeleteToday} colophonClosing={colophonClosing} colophonName={colophonName} onChangeColophonClosing={handleChangeColophonClosing} onChangeColophonName={handleChangeColophonName} />
+        <SettingsScreen user={user} onLogout={handleLogout} colophonClosing={colophonClosing} colophonName={colophonName} onChangeColophonClosing={handleChangeColophonClosing} onChangeColophonName={handleChangeColophonName} />
       )}
 
       <View style={s.bottomNav}>
@@ -1202,8 +1152,6 @@ const s = StyleSheet.create({
   colophonChipText:   { fontSize: 13, color: '#9a8f85' },
   colophonChipTextActive: { color: '#8b5e3c' },
   toast:           { position: 'absolute', bottom: 80, alignSelf: 'center', backgroundColor: '#1a1510', paddingHorizontal: 20, paddingVertical: 10 },
-  testBtn:         { borderWidth: 1, borderColor: '#9a8f85', padding: 12, alignItems: 'center' },
-  testBtnText:     { fontSize: 13, color: '#9a8f85' },
   lineLoginBtn:     { backgroundColor: '#06C755', padding: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 10 },
   lineLoginBtnText: { color: '#ffffff', fontSize: 15, fontWeight: '600', letterSpacing: 0.5 },
   homeGreeting:     { fontSize: 13, color: '#9a8f85', letterSpacing: 0.5 },
