@@ -2,6 +2,7 @@
   "expo": {
     "name": "綴り",
     "slug": "cho",
+    "icon": "./assets/icon.png",
     "scheme": "jp.mmsystems.cho",
     "version": "1.0.0",
     "orientation": "portrait",
