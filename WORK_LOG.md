@@ -86,3 +86,25 @@
 - AI記憶機能実装後の初TestFlightビルド
 - `eas build --platform ios --profile preview` 実行
 - ビルドURL: https://expo.dev/accounts/mmsystems/builds/
+
+---
+
+### 2026-03-05 App Store審査対応（Guideline 5.1.1(v)）
+
+**背景**
+- Appleから却下：アカウント削除機能がないため
+
+**変更内容**
+- backend/lambda/auth/index.ts：DELETE /auth/account エンドポイント追加（DynamoDB全件削除、BatchWriteItem、ページネーション対応）
+- IAMロール tsuzuri-prod-lambda-role に dynamodb:BatchWriteItem 権限追加
+- mobile/App.js：設定画面にアカウント削除ボタン追加（確認ダイアログ→削除→ログアウト）
+- mobile/App.js：設定画面の落款名プレースホルダーを「光晴、まんだい　など」→「名前やニックネーム」に修正
+
+**テスト結果**
+- バックエンド全4テスト PASS（Claude Codeで実施）
+- フロントエンド テスト5〜8 PASS（実機確認）
+
+**デプロイ**
+- バックエンド deploy.ps1 完了
+- EASビルド production（Build 28）完了
+- App Store Connect アップロード済み → 再審査待ち

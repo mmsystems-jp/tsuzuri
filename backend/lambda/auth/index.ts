@@ -3,7 +3,7 @@
  */
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { DynamoDBClient, GetItemCommand, PutItemCommand, QueryCommand, DeleteItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand, PutItemCommand, QueryCommand, DeleteItemCommand, UpdateItemCommand, BatchWriteItemCommand } from '@aws-sdk/client-dynamodb';
 import { randomBytes } from 'crypto';
 import * as https from 'https';
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
@@ -551,6 +551,40 @@ export const handler = async (event: any): Promise<APIGatewayProxyResult> => {
     }));
 
     return ok({ notifyEnabled });
+  }
+
+  // アカウント削除
+  if (path.endsWith('/auth/account') && method === 'DELETE') {
+    const authHeader = event.headers?.Authorization || event.headers?.authorization || '';
+    const userId = await verifySession(authHeader);
+    if (!userId) return err('Unauthorized', 401);
+
+    let lastEvaluatedKey: Record<string, any> | undefined;
+    do {
+      const res = await dynamo.send(new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: 'PK = :pk',
+        ExpressionAttributeValues: { ':pk': { S: `USER#${userId}` } },
+        Limit: 100,
+        ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
+      }));
+
+      const items = res.Items || [];
+      for (let i = 0; i < items.length; i += 25) {
+        const chunk = items.slice(i, i + 25);
+        await dynamo.send(new BatchWriteItemCommand({
+          RequestItems: {
+            [TABLE]: chunk.map(item => ({
+              DeleteRequest: { Key: { PK: item.PK, SK: item.SK } },
+            })),
+          },
+        }));
+      }
+
+      lastEvaluatedKey = res.LastEvaluatedKey;
+    } while (lastEvaluatedKey);
+
+    return ok({ deleted: true });
   }
 
   return err('Not found', 404);

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(aws sts:*)",
+      "Bash(aws dynamodb:*)",
+      "Bash(npm run:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(curl:*)",
+      "Bash(aws iam:*)"
+    ]
+  }
+}

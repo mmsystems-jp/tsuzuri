@@ -802,7 +802,7 @@ function SettingsScreen({ user, onLogout, colophonClosing, colophonName, onChang
             style={s.colophonInput}
             value={colophonName}
             onChangeText={onChangeColophonName}
-            placeholder="光晴、まんだい　など"
+            placeholder="名前やニックネーム"
             placeholderTextColor={C.inkFaint}
             maxLength={20}
           />
@@ -836,6 +836,33 @@ function SettingsScreen({ user, onLogout, colophonClosing, colophonName, onChang
         </View>
         <TouchableOpacity style={s.logoutBtn} onPress={onLogout}>
           <Text style={s.logoutBtnText}>ロック（次回はFace IDで開く）</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[s.logoutBtn, { marginTop: 12 }]}
+          onPress={() => {
+            Alert.alert(
+              'アカウントを削除する',
+              '本当に削除しますか？この操作は取り消せません',
+              [
+                { text: 'キャンセル', style: 'cancel' },
+                {
+                  text: '削除する',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      await apiFetch('/auth/account', { method: 'DELETE' });
+                      await SecureStore.deleteItemAsync('tsz_token');
+                      onLogout();
+                    } catch (e) {
+                      Alert.alert('エラー', e.message || 'アカウントの削除に失敗しました');
+                    }
+                  },
+                },
+              ]
+            );
+          }}
+        >
+          <Text style={s.logoutBtnText}>アカウントを削除する</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
