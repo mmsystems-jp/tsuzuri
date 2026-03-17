@@ -7,6 +7,7 @@ import {
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import { incrementAndCheckReview } from './src/utils/reviewRequest';
 
 const API_URL = 'https://o5k36gp6jd.execute-api.ap-northeast-1.amazonaws.com';
 const ANTHROPIC_KEY = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY || '';
@@ -662,6 +663,7 @@ function DiaryPreviewScreen({ diary, existingText, conversation, onContinue, onR
         await apiFetch(`/diary/${date}`, { method: 'PUT', body: JSON.stringify({ text: saveText, moodIdx: 0 }) });
       } else {
         await apiFetch('/diary', { method: 'POST', body: JSON.stringify({ text: saveText, date, conversation, moodIdx: 0 }) });
+        void incrementAndCheckReview();
       }
       onSaved(saveText);
     } catch (e) { Alert.alert('エラー', e.message); }
