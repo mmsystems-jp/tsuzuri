@@ -7,13 +7,18 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "locales": {
+      "ja": "./assets/locales/ja.json"
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "jp.mmsystems.cho",
       "usesAppleSignIn": true,
       "infoPlist": {
         "NSFaceIDUsageDescription": "綴りを開くためにFace IDを使用します。",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleLocalizations": ["ja"],
+        "CFBundleDevelopmentRegion": "ja"
       }
     },
     "android": {
