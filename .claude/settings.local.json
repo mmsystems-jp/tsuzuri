@@ -6,7 +6,25 @@
       "Bash(npm run:*)",
       "Bash(powershell.exe:*)",
       "Bash(curl:*)",
-      "Bash(aws iam:*)"
+      "Bash(aws iam:*)",
+      "Bash(npx tsc:*)",
+      "Bash(timeout 15 npx expo:*)",
+      "Bash(CI=1 timeout 12 npx expo:*)",
+      "Bash(CI=1 timeout 15 npx expo:*)",
+      "Bash(npm install:*)",
+      "Bash(node:*)",
+      "Bash(npx jest:*)",
+      "Bash(python3:*)",
+      "Bash($src =:*)",
+      "Bash(fi)",
+      "Bash(gh auth:*)",
+      "Bash(ssh:*)",
+      "Bash(eas build:*)",
+      "Bash(eas build:view:*)",
+      "WebFetch(domain:expo.dev)",
+      "Bash(eas build:logs:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)"
     ]
   }
 }

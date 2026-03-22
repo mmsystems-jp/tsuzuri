@@ -4,7 +4,7 @@
     "slug": "cho",
     "icon": "./assets/icon.png",
     "scheme": "jp.mmsystems.cho",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "locales": {
@@ -13,6 +13,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "jp.mmsystems.cho",
+      "buildNumber": "2",
       "usesAppleSignIn": true,
       "infoPlist": {
         "NSFaceIDUsageDescription": "綴りを開くためにFace IDを使用します。",
